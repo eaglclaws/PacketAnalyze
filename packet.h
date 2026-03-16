@@ -2,6 +2,10 @@
 #define PACKET_H
 #include <stdint.h>
 #include <stddef.h>
+
+#define TS_PID_PAT  0x0000u
+#define TS_PID_NULL 0x1FFFu
+
 typedef struct ts_packet_s {
     uint8_t sync_byte;
     uint8_t tei;
@@ -57,6 +61,7 @@ typedef struct psi_header_s {
     uint16_t section_offset;
 } psi_header_t;
 
+
 typedef struct pat_program_s {
     uint16_t program_number;
     uint16_t pid;
@@ -69,7 +74,26 @@ typedef struct pat_table_s {
     pat_program_t* programs;
 } pat_table_t;
 
+
 typedef struct pat_s {
     uint16_t* pid_list;
 } pat_t;
+
+/* Descriptor-derived fields; empty/0 means not present. */
+#define PMT_ES_LANGUAGE_LEN 4  /* ISO 639-2/B 3 chars + NUL */
+
+typedef struct pmt_es_s {
+    uint8_t stream_type;
+    uint16_t elementary_pid;
+    char language_code[PMT_ES_LANGUAGE_LEN];  /* e.g. "eng", from ISO_639_language_descriptor (0x0A) */
+    uint8_t avc_profile_idc;   /* from AVC_video_descriptor (0x28), 0 if not present */
+    uint8_t avc_level_idc;    /* from AVC_video_descriptor (0x28), 0 if not present */
+} pmt_es_t;
+
+typedef struct pmt_s {
+    uint16_t pcr_pid;
+    size_t capacity;
+    size_t es_count;
+    pmt_es_t* es_list;
+} pmt_t;
 #endif // PACKET_H

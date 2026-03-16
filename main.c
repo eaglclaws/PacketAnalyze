@@ -1,38 +1,44 @@
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include "packet.h"
 #include "parser.h"
 #include "utils.h"
 
-#define MAX_PID 8192
 #define PACKET_SIZE 188
-
-#define PID_PAT 0x0000
 
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     FILE* file = fopen(argv[1], "rb");
-    if (file != NULL) printf("Opened file\n");
+    if (file != NULL)
+        printf("Opened file\n");
     uint8_t buffer[PACKET_SIZE];
     long packet_count = 0;
     pat_table_t current_pat;
-    current_pat.program_count = 0;
-    current_pat.capacity = 2;
-    current_pat.programs = (pat_program_t*)malloc(sizeof(pat_program_t) * current_pat.capacity);
+    pat_table_init(&current_pat);
+    pmt_t* pmt_table = NULL;
+    size_t pmt_table_capacity = 0;
     pid_count_list_t list;
     pid_count_list_init(&list);
+    int printed_header = 0;
+    ts_cc_init();
+
     while (fread(buffer, 1, PACKET_SIZE, file) == PACKET_SIZE) {
         ts_packet_t packet;
         parse_ts_packet(buffer, PACKET_SIZE, &packet);
-        pid_count_list_update(&list, packet.pid);
+        if (packet.adaptation_field_control == 3 && !printed_header) {
+            print_packet_header(&packet);
+            printed_header = 1;
+        }
+        ts_cc_check(&packet);
+        process_packet_psi(buffer, PACKET_SIZE, &packet, &current_pat, &pmt_table, &pmt_table_capacity, &list);
+        ts_cc_update(&packet);
         packet_count++;
     }
-    printf("%ld packets\n", packet_count);
-    for (size_t i = 0; i < list.count; i++) {
-        printf("PID: 0x%04X = %zu\n", list.pids[i].pid, list.pids[i].count);
-    }
+
+    print_ts_report(&current_pat, pmt_table, &list, packet_count);
+    ts_cleanup(&current_pat, pmt_table, pmt_table_capacity, &list);
     fclose(file);
     return 0;
 }

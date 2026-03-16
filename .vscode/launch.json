@@ -5,7 +5,7 @@
       "name": "C/C++ Runner: Debug Session",
       "type": "lldb",
       "request": "launch",
-      "args": ["ABC.ts"],
+      "args": ["control.ts"],
       "cwd": "/Users/mukyoku/Source/PacketAnalyze",
       "program": "/Users/mukyoku/Source/PacketAnalyze/build/Debug/outDebug"
     }
