@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #define BOOL_STRING(x) (x ? "TRUE" : "FALSE")
 
 #define MAX_PID 8192
@@ -88,7 +89,7 @@ void pat_table_init(pat_table_t* table) {
     table->programs = (pat_program_t*)malloc(sizeof(pat_program_t) * table->capacity);
 }
 
-void pat_table_clean(pat_table_t* table) {
+void pat_table_cleanup(pat_table_t* table) {
     free(table->programs);
 }
 
@@ -108,19 +109,25 @@ void ts_cc_init(void) {
     }
 }
 
-void ts_cc_check(const ts_packet_t* packet) {
+int ts_cc_check(const ts_packet_t* packet, FILE* out) {
+    int reported = 0;
     if (packet->sync_byte != 0x47) {
-        printf("Sync byte error: PID: 0x%04X, SB: 0x%02X\n", packet->pid, packet->sync_byte);
+        if (out)
+            fprintf(out, "Sync byte error: PID: 0x%04X, SB: 0x%02X\n", packet->pid, packet->sync_byte);
+        reported = 1;
     }
     if (packet->pid == TS_PID_NULL || packet->pid >= MAX_PID)
-        return;
+        return reported;
     if (s_previous_continuity_counter[packet->pid] > 15 || !s_previous_had_payload[packet->pid])
-        return;
+        return reported;
     uint8_t expected = (s_previous_continuity_counter[packet->pid] + 1) % 16;
     if (packet->continuity_counter != expected) {
-        printf("Continuity counter error: PID: 0x%04X, CC: %u -> %u\n",
-               packet->pid, (unsigned)s_previous_continuity_counter[packet->pid], (unsigned)packet->continuity_counter);
+        if (out)
+            fprintf(out, "Continuity counter error: PID: 0x%04X, CC: %u -> %u\n",
+                    packet->pid, (unsigned)s_previous_continuity_counter[packet->pid], (unsigned)packet->continuity_counter);
+        reported = 1;
     }
+    return reported;
 }
 
 void ts_cc_update(const ts_packet_t* packet) {
@@ -146,12 +153,8 @@ void pmt_table_ensure_capacity(const pat_table_t* pat, pmt_t** pmt_table, size_t
     }
 }
 
-void print_ts_report(const pat_table_t* pat, const pmt_t* pmt_table, const pid_count_list_t* list, long packet_count) {
+void print_ts_report(const pat_table_t* pat, const pmt_t* pmt_table, const pid_count_list_t* list) {
     printf("\n");
-    printf("┌────────────────────────────────────────────────── Summary\n");
-    printf("│  Total packets            %ld\n", packet_count);
-    printf("└──────────────────────────────────────────────────\n\n");
-
     printf("┌────────────────────────────────────────────────── PAT\n");
     printf("│  %-22s %s\n", "Program number", "PMT PID");
     printf("├──────────────────────────────────────────────────\n");
@@ -193,14 +196,56 @@ void print_ts_report(const pat_table_t* pat, const pmt_t* pmt_table, const pid_c
     }
 }
 
-void ts_cleanup(pat_table_t* pat, pmt_t* pmt_table, size_t pmt_table_capacity, pid_count_list_t* list) {
+void report_undefined_pids(const pat_table_t* pat, const pmt_t* pmt_table, size_t pmt_capacity,
+                          const pid_count_list_t* list, int* errors_found) {
+    uint8_t defined[MAX_PID];
+    memset(defined, 0, sizeof defined);
+    defined[TS_PID_PAT] = 1;
+    defined[TS_PID_NULL] = 1;
+    for (size_t i = 0; i < pat->program_count; i++)
+        if (pat->programs[i].pid < MAX_PID)
+            defined[pat->programs[i].pid] = 1;
+    for (size_t i = 0; i < pmt_capacity && pmt_table; i++) {
+        if (pmt_table[i].pcr_pid < MAX_PID)
+            defined[pmt_table[i].pcr_pid] = 1;
+        for (size_t j = 0; j < pmt_table[i].es_count; j++)
+            if (pmt_table[i].es_list[j].elementary_pid < MAX_PID)
+                defined[pmt_table[i].es_list[j].elementary_pid] = 1;
+    }
+    for (size_t i = 0; i < list->count; i++) {
+        uint16_t pid = list->pids[i].pid;
+        if (pid < MAX_PID && !defined[pid]) {
+            printf("Undefined PID: 0x%04X (packets: %zu)\n", (unsigned)pid, list->pids[i].count);
+            if (errors_found)
+                *errors_found = 1;
+        }
+    }
+}
+
+void print_pid_ratio_header(const pid_count_list_t* list, long total_packets) {
+    if (total_packets <= 0)
+        return;
+    printf("\n");
+    printf("┌────────────────────────────────────────────────── PID statistics (ratio of total packets)\n");
+    printf("│  %-12s %-12s %s\n", "PID", "Count", "Ratio");
+    printf("├──────────────────────────────────────────────────\n");
+    for (size_t i = 0; i < list->count; i++) {
+        double ratio = 100.0 * (double)list->pids[i].count / (double)total_packets;
+        printf("│  0x%04X      %-12zu %.2f%%\n",
+               (unsigned)list->pids[i].pid, list->pids[i].count, ratio);
+    }
+    printf("│  %-12s %-12ld %s\n", "(total)", total_packets, "100.00%");
+    printf("└──────────────────────────────────────────────────\n\n");
+}
+
+void ts_state_cleanup(pat_table_t* pat, pmt_t* pmt_table, size_t pmt_table_capacity, pid_count_list_t* list) {
     if (pmt_table) {
         for (size_t i = 0; i < pmt_table_capacity; i++)
             free(pmt_table[i].es_list);
         free(pmt_table);
     }
-    pat_table_clean(pat);
-    pid_count_list_clean(list);
+    pat_table_cleanup(pat);
+    pid_count_list_cleanup(list);
 }
 
 /*int pat_contains_pid(pat_table_t* pat, uint16_t pid) {
@@ -369,7 +414,7 @@ int pid_count_list_find(pid_count_list_t* list, uint16_t pid) {
     return -1;
 }
 
-void pid_count_list_clean(pid_count_list_t* list) {
+void pid_count_list_cleanup(pid_count_list_t* list) {
     free(list->pids);
 }
 
@@ -377,5 +422,26 @@ void pid_count_list_update_type(pid_count_list_t* list, uint16_t pid, pid_type_t
     int idx = (int)pid_count_list_find(list, pid);
     if (idx != -1) {
         list->pids[idx].type = type;
+    }
+}
+
+void print_hexdump(const uint8_t* buffer, size_t length) {
+    const size_t width = 16;
+    for (size_t i = 0; i < length; i += width) {
+        printf("%08zx  ", i);
+        for (size_t j = 0; j < width; j++) {
+            if (i + j < length)
+                printf("%02x ", buffer[i + j]);
+            else
+                printf("   ");
+            if (j == 7)
+                printf(" ");
+        }
+        printf(" |");
+        for (size_t j = 0; j < width && i + j < length; j++) {
+            unsigned char c = buffer[i + j];
+            putchar((c >= 0x20 && c < 0x7f) ? c : '.');
+        }
+        printf("|\n");
     }
 }

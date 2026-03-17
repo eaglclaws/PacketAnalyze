@@ -99,7 +99,9 @@ int parse_ts_packet(const uint8_t* buffer, size_t buffer_len, ts_packet_t* packe
     reset_adaptation_fields(packet);
 
     packet->sync_byte = buffer[0];
-
+    if (packet->sync_byte != 0x47) {
+        return 0;
+    }
     // Byte 1 (buffer[1]): 1 bit TEI, 1 bit PUSI, 1 bit TP, 5 bits PID(12:8)
     packet->tei = (buffer[1] & 0x80) >> 7;
     packet->pusi = (buffer[1] & 0x40) >> 6;

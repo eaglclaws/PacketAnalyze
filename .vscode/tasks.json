@@ -32,6 +32,85 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "run with less (current file)",
+      "type": "shell",
+      "command": "/bin/zsh",
+      "args": [
+        "-c",
+        "./build/Debug/outDebug --packets \"${file}\" | less -S"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "dependsOn": "build (debug)",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "run with less (control.ts)",
+      "type": "shell",
+      "command": "/bin/zsh",
+      "args": [
+        "-c",
+        "./build/Debug/outDebug --packets ./control.ts | less -S"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "dependsOn": "build (debug)",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "hexdump packet (current file)",
+      "type": "shell",
+      "command": "./build/Debug/outDebug",
+      "args": ["--hexdump", "${file}", "${input:packetNumber}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "dependsOn": "build (debug)",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "build parser tests",
+      "type": "shell",
+      "command": "/bin/zsh",
+      "args": [
+        "-c",
+        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./parser_test.c ./parser.c ./utils.c -o ./build/Debug/parser_test"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": ["$gcc"],
+      "group": "build"
+    },
+    {
+      "label": "run parser tests",
+      "type": "shell",
+      "command": "./build/Debug/parser_test",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "dependsOn": "build parser tests",
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "packetNumber",
+      "type": "promptString",
+      "description": "Packet index (0-based)",
+      "default": "0"
     }
   ]
 }

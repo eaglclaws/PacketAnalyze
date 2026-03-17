@@ -2,10 +2,96 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug --validate (current file)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--validate",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --psi-analyze (current file)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--psi-analyze",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --packets (current file)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--packets",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --validate (control.ts)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--validate",
+        "${workspaceFolder}/control.ts"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --hexdump (current file, packet 0)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--hexdump",
+        "${file}",
+        "0"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --hexdump (control.ts, packet 0)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--hexdump",
+        "${workspaceFolder}/control.ts",
+        "200"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
+      "name": "Debug --jitter-test (current file)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/outDebug",
+      "args": [
+        "--jitter-test",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug)"
+    },
+    {
       "name": "C/C++ Runner: Debug Session",
       "type": "lldb",
       "request": "launch",
-      "args": ["control.ts"],
+      "args": [],
       "cwd": "/Users/mukyoku/Source/PacketAnalyze",
       "program": "/Users/mukyoku/Source/PacketAnalyze/build/Debug/outDebug"
     }
