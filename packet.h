@@ -96,4 +96,54 @@ typedef struct pmt_s {
     size_t es_count;
     pmt_es_t* es_list;
 } pmt_t;
+
+typedef struct pes_packet_s {
+    uint32_t packet_start_code_prefix;
+    uint8_t stream_id;
+    uint16_t packet_length;
+    uint8_t scrambling_control;
+    uint8_t priority_indicator;
+    uint8_t data_alignment_indicator;
+    uint8_t copyright_flag;
+    uint8_t original_or_copy;
+    uint8_t PTS_DTS_flags;
+    uint8_t escr_flag;
+    uint8_t es_rate_flag;
+    uint8_t dsm_trick_mode_flag;
+    uint8_t additional_copy_info_flag;
+    uint8_t crc_flag;
+    uint8_t extension_flag;
+    uint8_t header_length;
+    uint64_t pts;  /* valid when PTS_DTS_flags >= 2 */
+    uint64_t dts;  /* valid when PTS_DTS_flags == 3 */
+} pes_packet_t;
+
+typedef struct pes_packet_list_s {
+    uint16_t pid;
+    pes_packet_t* packets;
+    size_t count;
+    size_t capacity;
+} pes_packet_list_t;
+
+/* Dynamic array of pes_packet_list_t (one list per PID). */
+typedef struct pes_packet_list_table_s {
+    pes_packet_list_t* lists;
+    size_t count;
+    size_t capacity;
+} pes_packet_list_table_t;
+
+/* One accumulating PES buffer per PID (for reassembling PES across TS packets). */
+typedef struct pes_buffer_entry_s {
+    uint16_t pid;
+    uint8_t* buffer;
+    size_t length;
+    size_t capacity;
+} pes_buffer_entry_t;
+
+typedef struct pes_buffer_table_s {
+    pes_buffer_entry_t* entries;
+    size_t count;
+    size_t capacity;
+} pes_buffer_table_t;
+
 #endif // PACKET_H

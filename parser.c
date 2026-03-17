@@ -297,6 +297,9 @@ void process_packet_psi(const uint8_t* buffer, size_t buffer_len, const ts_packe
         pid_count_list_update_type(list, packet->pid, PID_NULL);
         return;
     }
+    if (is_well_known_si_pid(packet->pid)) {
+        pid_count_list_update_type(list, packet->pid, PID_SI);
+    }
     if (packet->pid == TS_PID_PAT) {
         pid_count_list_update_type(list, packet->pid, PID_PAT);
         int pointer_field = (int)buffer[packet->payload_offset];
@@ -399,5 +402,62 @@ int parse_pmt_section(const uint8_t* buffer, size_t buffer_len, const psi_header
             break;
         }
     }
+    return 1;
+}
+
+int parse_pes_header(const uint8_t* buffer, size_t buffer_len, pes_packet_t* out) {
+    if (buffer == NULL || out == NULL || buffer_len < 9u) {
+        return 0;
+    }
+    out->packet_start_code_prefix = (uint32_t)buffer[0] << 16 | (uint32_t)buffer[1] << 8 | (uint32_t)buffer[2];
+    out->stream_id = buffer[3];
+    out->packet_length = (uint16_t)(((uint16_t)buffer[4] << 8 | (uint16_t)buffer[5]) + 1);
+    out->scrambling_control = (buffer[6] & 0x3Fu) >> 4;
+    out->priority_indicator = (buffer[6] & 0x08u) >> 3;
+    out->data_alignment_indicator = (buffer[6] & 0x04u) >> 2;
+    out->copyright_flag = (buffer[6] & 0x02u) >> 1;
+    out->original_or_copy = buffer[6] & 0x01u;
+    out->PTS_DTS_flags = (buffer[7] & 0xC0u) >> 6;
+    out->escr_flag = (buffer[7] & 0x20u) >> 5;
+    out->es_rate_flag = (buffer[7] & 0x10u) >> 4;
+    out->dsm_trick_mode_flag = (buffer[7] & 0x08u) >> 3;
+    out->additional_copy_info_flag = (buffer[7] & 0x04u) >> 2;
+    out->crc_flag = (buffer[7] & 0x02u) >> 1;
+    out->extension_flag = (buffer[7] & 0x01u);
+    out->header_length = buffer[8];
+    return 1;
+}
+
+/* Parse 33-bit PTS/DTS from optional header (5 bytes, pointer at first byte with marker bits). */
+static uint64_t parse_pts_dts_33(const uint8_t* p) {
+    return ((uint64_t)(p[0] & 0x0Eu) << 29)
+         | ((uint64_t)p[1] << 22)
+         | ((uint64_t)(p[2] & 0xFEu) << 14)
+         | ((uint64_t)p[3] << 7)
+         | ((uint64_t)(p[4] & 0xFEu) >> 1);
+}
+
+/* Fill pts/dts in *out from PES optional header. Call after parse_pes_header. Returns 1 on success. */
+int populate_pes_pts_dts(const uint8_t* buffer, size_t buffer_len, pes_packet_t* out) {
+    if (buffer == NULL || out == NULL) {
+        return 0;
+    }
+    out->pts = 0;
+    out->dts = 0;
+    if (out->PTS_DTS_flags < 2u) {
+        return 1; /* no PTS */
+    }
+    /* Optional header: 1 byte (marker + PTS high bits) + 5 bytes PTS = 6 bytes from offset 9 */
+    if (buffer_len < 15u) {
+        return 0;
+    }
+    out->pts = parse_pts_dts_33(&buffer[9]);
+    if (out->PTS_DTS_flags != 3u) {
+        return 1; /* PTS only */
+    }
+    if (buffer_len < 20u) {
+        return 0;
+    }
+    out->dts = parse_pts_dts_33(&buffer[14]);
     return 1;
 }

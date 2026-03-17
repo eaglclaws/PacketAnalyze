@@ -2,12 +2,142 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define BOOL_STRING(x) (x ? "TRUE" : "FALSE")
 
 #define MAX_PID 8192
 #define CC_NEVER_SEEN 16
 static uint8_t s_previous_continuity_counter[MAX_PID];
-static uint8_t s_previous_had_payload[MAX_PID];
+
+typedef enum validation_event_type_e {
+    VALIDATION_EVENT_SYNC = 0,
+    VALIDATION_EVENT_CC = 1
+} validation_event_type_t;
+
+typedef struct validation_sample_s {
+    validation_event_type_t type;
+    size_t packet_index;
+    uint16_t pid;
+    uint8_t sync_byte;
+    uint8_t expected_cc;
+    uint8_t got_cc;
+} validation_sample_t;
+
+static size_t s_validation_packets_scanned = 0;
+static size_t s_validation_sync_errors = 0;
+static size_t s_validation_cc_errors = 0;
+static size_t s_validation_cc_error_by_pid[MAX_PID];
+static size_t s_validation_cc_first_packet_by_pid[MAX_PID];
+static size_t s_validation_cc_last_packet_by_pid[MAX_PID];
+static size_t s_validation_sample_count = 0;
+static size_t s_validation_sample_omitted = 0;
+static validation_sample_t s_validation_samples[VALIDATION_SAMPLE_LIMIT];
+
+static void validation_summary_add_sample(validation_event_type_t type,
+                                          size_t packet_index,
+                                          uint16_t pid,
+                                          uint8_t sync_byte,
+                                          uint8_t expected_cc,
+                                          uint8_t got_cc) {
+    if (s_validation_sample_count < VALIDATION_SAMPLE_LIMIT) {
+        validation_sample_t* sample = &s_validation_samples[s_validation_sample_count++];
+        sample->type = type;
+        sample->packet_index = packet_index;
+        sample->pid = pid;
+        sample->sync_byte = sync_byte;
+        sample->expected_cc = expected_cc;
+        sample->got_cc = got_cc;
+    } else {
+        s_validation_sample_omitted++;
+    }
+}
+
+void validation_summary_init(void) {
+    s_validation_packets_scanned = 0;
+    s_validation_sync_errors = 0;
+    s_validation_cc_errors = 0;
+    s_validation_sample_count = 0;
+    s_validation_sample_omitted = 0;
+    memset(s_validation_cc_error_by_pid, 0, sizeof s_validation_cc_error_by_pid);
+    memset(s_validation_cc_first_packet_by_pid, 0, sizeof s_validation_cc_first_packet_by_pid);
+    memset(s_validation_cc_last_packet_by_pid, 0, sizeof s_validation_cc_last_packet_by_pid);
+    memset(s_validation_samples, 0, sizeof s_validation_samples);
+}
+
+size_t validation_summary_total_errors(void) {
+    return s_validation_sync_errors + s_validation_cc_errors;
+}
+
+void validation_summary_print(FILE* out) {
+    size_t cc_affected_pid_count = 0;
+    for (size_t pid = 0; pid < MAX_PID; pid++) {
+        if (s_validation_cc_error_by_pid[pid] > 0u) {
+            cc_affected_pid_count++;
+        }
+    }
+
+    fprintf(out, "│  Packets scanned: %zu\n", s_validation_packets_scanned);
+    fprintf(out, "│  Sync losses:     %zu\n", s_validation_sync_errors);
+    fprintf(out, "│  CC errors:       %zu (affected PIDs: %zu)\n",
+            s_validation_cc_errors, cc_affected_pid_count);
+
+    if (s_validation_cc_errors > 0u) {
+        size_t rows_printed = 0;
+        const size_t max_rows = 12u;
+        fprintf(out, "├────────────────────────────────────────────────── CC errors by PID\n");
+        fprintf(out, "│  %-10s %-10s %-10s %s\n", "PID", "Count", "First pkt", "Last pkt");
+        for (size_t pid = 0; pid < MAX_PID; pid++) {
+            if (s_validation_cc_error_by_pid[pid] == 0u) {
+                continue;
+            }
+            if (rows_printed < max_rows) {
+                fprintf(out, "│  0x%04X     %-10zu %-10zu %zu\n",
+                        (unsigned)pid,
+                        s_validation_cc_error_by_pid[pid],
+                        s_validation_cc_first_packet_by_pid[pid],
+                        s_validation_cc_last_packet_by_pid[pid]);
+            }
+            rows_printed++;
+        }
+        if (rows_printed > max_rows) {
+            fprintf(out, "│  ... %zu PID rows omitted ...\n", rows_printed - max_rows);
+        }
+    }
+
+    if (s_validation_sample_count > 0u || s_validation_sample_omitted > 0u) {
+        fprintf(out, "├────────────────────────────────────────────────── Samples (first %u)\n",
+                (unsigned)VALIDATION_SAMPLE_LIMIT);
+        for (size_t i = 0; i < s_validation_sample_count; i++) {
+            const validation_sample_t* sample = &s_validation_samples[i];
+            if (sample->type == VALIDATION_EVENT_SYNC) {
+                fprintf(out, "│  SYNC pkt=%zu PID=0x%04X SB=0x%02X\n",
+                        sample->packet_index, (unsigned)sample->pid, (unsigned)sample->sync_byte);
+            } else {
+                fprintf(out, "│  CC   pkt=%zu PID=0x%04X expected=%u got=%u\n",
+                        sample->packet_index,
+                        (unsigned)sample->pid,
+                        (unsigned)sample->expected_cc,
+                        (unsigned)sample->got_cc);
+            }
+        }
+        if (s_validation_sample_omitted > 0u) {
+            fprintf(out, "│  ... %zu samples omitted ...\n", s_validation_sample_omitted);
+        }
+    }
+}
+
+int is_well_known_si_pid(uint16_t pid) {
+    switch (pid) {
+        case 0x0001u: /* CAT */
+        case 0x0002u: /* TSDT */
+        case 0x0010u: /* NIT / ST */
+        case 0x0011u: /* SDT / BAT */
+        case 0x0012u: /* EIT / CIT */
+        case 0x0013u: /* RST */
+        case 0x0014u: /* TDT / TOT */
+            return 1;
+        default:
+            return 0;
+    }
+}
 
 /* Table 2-34 stream_type -> VIDEO/AUDIO/OTHER. STREAM_OTHER=0, STREAM_VIDEO=1, STREAM_AUDIO=2. */
 static const uint8_t s_stream_category_table[256] = {
@@ -105,35 +235,64 @@ void pat_table_push(pat_table_t* table, pat_program_t program) {
 void ts_cc_init(void) {
     for (size_t i = 0; i < MAX_PID; i++) {
         s_previous_continuity_counter[i] = CC_NEVER_SEEN;
-        s_previous_had_payload[i] = 0;
     }
 }
 
-int ts_cc_check(const ts_packet_t* packet, FILE* out) {
+int ts_cc_check(const ts_packet_t* packet, FILE* out, size_t packet_index, int summarize) {
     int reported = 0;
+    if (summarize && packet_index + 1u > s_validation_packets_scanned) {
+        s_validation_packets_scanned = packet_index + 1u;
+    }
     if (packet->sync_byte != 0x47) {
-        if (out)
-            fprintf(out, "Sync byte error: PID: 0x%04X, SB: 0x%02X\n", packet->pid, packet->sync_byte);
+        if (summarize) {
+            s_validation_sync_errors++;
+            validation_summary_add_sample(VALIDATION_EVENT_SYNC, packet_index, packet->pid, packet->sync_byte, 0u, 0u);
+        }
+        if (out != NULL) {
+            fprintf(out, "│  Sync byte error: PID 0x%04X, SB 0x%02X\n", packet->pid, packet->sync_byte);
+        }
         reported = 1;
     }
     if (packet->pid == TS_PID_NULL || packet->pid >= MAX_PID)
         return reported;
-    if (s_previous_continuity_counter[packet->pid] > 15 || !s_previous_had_payload[packet->pid])
+    if (s_previous_continuity_counter[packet->pid] > 15)
         return reported;
-    uint8_t expected = (s_previous_continuity_counter[packet->pid] + 1) % 16;
+
+    /* Ignore packets with adaptation_field_control == 0 (reserved). */
+    if (packet->adaptation_field_control == 0u)
+        return reported;
+
+    /* Discontinuity indicator authorizes continuity counter discontinuity. */
+    if (packet->discontinuity_indicator)
+        return reported;
+
+    uint8_t expected = s_previous_continuity_counter[packet->pid];
+    if ((packet->adaptation_field_control & 0x01u) != 0u) {
+        expected = (uint8_t)((expected + 1u) & 0x0Fu);
+    }
+
     if (packet->continuity_counter != expected) {
-        if (out)
-            fprintf(out, "Continuity counter error: PID: 0x%04X, CC: %u -> %u\n",
+        if (summarize) {
+            s_validation_cc_errors++;
+            if (s_validation_cc_error_by_pid[packet->pid] == 0u) {
+                s_validation_cc_first_packet_by_pid[packet->pid] = packet_index;
+            }
+            s_validation_cc_error_by_pid[packet->pid]++;
+            s_validation_cc_last_packet_by_pid[packet->pid] = packet_index;
+            validation_summary_add_sample(VALIDATION_EVENT_CC, packet_index, packet->pid, 0u, expected, packet->continuity_counter);
+        }
+        if (out != NULL) {
+            fprintf(out, "│  Continuity counter error: PID 0x%04X, CC %u -> %u\n",
                     packet->pid, (unsigned)s_previous_continuity_counter[packet->pid], (unsigned)packet->continuity_counter);
+        }
         reported = 1;
     }
     return reported;
 }
 
 void ts_cc_update(const ts_packet_t* packet) {
-    if (packet->pid < MAX_PID) {
+    if (packet->pid < MAX_PID && packet->adaptation_field_control != 0u) {
         s_previous_continuity_counter[packet->pid] = packet->continuity_counter;
-        s_previous_had_payload[packet->pid] = (uint8_t)(packet->payload_length > 0 ? 1 : 0);
     }
 }
 
@@ -202,6 +361,11 @@ void report_undefined_pids(const pat_table_t* pat, const pmt_t* pmt_table, size_
     memset(defined, 0, sizeof defined);
     defined[TS_PID_PAT] = 1;
     defined[TS_PID_NULL] = 1;
+    for (uint16_t pid = 0; pid < MAX_PID; pid++) {
+        if (is_well_known_si_pid(pid)) {
+            defined[pid] = 1;
+        }
+    }
     for (size_t i = 0; i < pat->program_count; i++)
         if (pat->programs[i].pid < MAX_PID)
             defined[pat->programs[i].pid] = 1;
@@ -215,7 +379,7 @@ void report_undefined_pids(const pat_table_t* pat, const pmt_t* pmt_table, size_
     for (size_t i = 0; i < list->count; i++) {
         uint16_t pid = list->pids[i].pid;
         if (pid < MAX_PID && !defined[pid]) {
-            printf("Undefined PID: 0x%04X (packets: %zu)\n", (unsigned)pid, list->pids[i].count);
+            printf("│  Undefined PID: 0x%04X (packets: %zu)\n", (unsigned)pid, list->pids[i].count);
             if (errors_found)
                 *errors_found = 1;
         }
@@ -264,13 +428,146 @@ static void pkt_line(const char* label, const char* value) {
     printf(PKT_FMT, label, value);
 }
 
-void print_packet_header(ts_packet_t* packet) {
+#define PES_LINE_FMT "│  %-26s %s\n"
+
+static void pes_line(const char* label, const char* value) {
+    printf(PES_LINE_FMT, label, value);
+}
+
+void print_pes_header(const pes_packet_t* p) {
+    char buf[64];
+    printf("\n");
+    printf("┌────────────────────────────────────────────────── PES header\n");
+    snprintf(buf, sizeof buf, "0x%06X", p->packet_start_code_prefix);
+    pes_line("packet_start_code_prefix", buf);
+    snprintf(buf, sizeof buf, "0x%02X", (unsigned)p->stream_id);
+    pes_line("stream_id", buf);
+    snprintf(buf, sizeof buf, "%u", (unsigned)p->packet_length);
+    pes_line("packet_length", buf);
+    snprintf(buf, sizeof buf, "%u%u", p->scrambling_control / 2, p->scrambling_control % 2);
+    pes_line("scrambling_control", buf);
+    pes_line("priority_indicator", BOOL_STRING(p->priority_indicator));
+    pes_line("data_alignment_indicator", BOOL_STRING(p->data_alignment_indicator));
+    pes_line("copyright_flag", BOOL_STRING(p->copyright_flag));
+    pes_line("original_or_copy", BOOL_STRING(p->original_or_copy));
+    snprintf(buf, sizeof buf, "%u%u", p->PTS_DTS_flags / 2, p->PTS_DTS_flags % 2);
+    pes_line("PTS_DTS_flags", buf);
+    pes_line("escr_flag", BOOL_STRING(p->escr_flag));
+    pes_line("es_rate_flag", BOOL_STRING(p->es_rate_flag));
+    pes_line("dsm_trick_mode_flag", BOOL_STRING(p->dsm_trick_mode_flag));
+    pes_line("additional_copy_info_flag", BOOL_STRING(p->additional_copy_info_flag));
+    pes_line("crc_flag", BOOL_STRING(p->crc_flag));
+    pes_line("extension_flag", BOOL_STRING(p->extension_flag));
+    snprintf(buf, sizeof buf, "%u", (unsigned)p->header_length);
+    pes_line("header_length", buf);
+    printf("└──────────────────────────────────────────────────\n");
+}
+
+static void format_pts_dts_string(uint64_t ts_90k, char* buf, size_t buf_size) {
+    uint64_t total_ms = (ts_90k * 1000u) / 90000u;
+    uint64_t hours   = total_ms / 3600000u;
+    uint64_t minutes = (total_ms % 3600000u) / 60000u;
+    uint64_t seconds = (total_ms % 60000u) / 1000u;
+    uint64_t millis  = total_ms % 1000u;
+    snprintf(buf, buf_size, "0x%012llX (%02llu:%02llu:%02llu.%03llu)",
+        (unsigned long long)ts_90k,
+        (unsigned long long)hours,
+        (unsigned long long)minutes,
+        (unsigned long long)seconds,
+        (unsigned long long)millis);
+}
+
+void print_pts_dts(const pes_packet_t* p) {
+    char buf[64];
+    printf("\n");
+    printf("┌────────────────────────────────────────────────── PTS/DTS\n");
+    if (p->PTS_DTS_flags >= 2u) {
+        format_pts_dts_string(p->pts, buf, sizeof buf);
+        pes_line("PTS", buf);
+        if (p->PTS_DTS_flags == 3u) {
+            format_pts_dts_string(p->dts, buf, sizeof buf);
+            pes_line("DTS", buf);
+        }
+    } else {
+        pes_line("PTS", "(not present)");
+    }
+    printf("└──────────────────────────────────────────────────\n");
+}
+
+void print_pes_one_line(const pes_packet_t* p, size_t index) {
+    char pts_buf[64];
+    char dts_buf[64];
+    if (p->PTS_DTS_flags >= 2u) {
+        format_pts_dts_string(p->pts, pts_buf, sizeof pts_buf);
+        if (p->PTS_DTS_flags == 3u) {
+            format_pts_dts_string(p->dts, dts_buf, sizeof dts_buf);
+            printf("#%-4zu  sid=0x%02X  PTS=%s  DTS=%s\n",
+                index, (unsigned)p->stream_id, pts_buf, dts_buf);
+        } else {
+            printf("#%-4zu  sid=0x%02X  PTS=%s\n", index, (unsigned)p->stream_id, pts_buf);
+        }
+    } else {
+        printf("#%-4zu  sid=0x%02X  (no PTS/DTS)\n", index, (unsigned)p->stream_id);
+    }
+}
+
+void print_pes_streams_summary(const pmt_t* pmt_table, size_t pmt_table_capacity) {
+    size_t n_streams = 0;
+    for (size_t i = 0; i < pmt_table_capacity; i++) {
+        n_streams += pmt_table[i].es_count;
+    }
+    printf("\n┌────────────────────────────────────────────────── PES streams (%zu)\n", n_streams);
+    for (size_t i = 0; i < pmt_table_capacity; i++) {
+        for (size_t j = 0; j < pmt_table[i].es_count; j++) {
+            const pmt_es_t* es = &pmt_table[i].es_list[j];
+            const char* codec = stream_type_to_codec_string(es->stream_type);
+            stream_category_t cat = stream_category_from_type(es->stream_type);
+            const char* cat_str = cat == STREAM_VIDEO ? "Video" : cat == STREAM_AUDIO ? "Audio" : "Other";
+            printf("│  0x%04X  %-8s (%s)\n", es->elementary_pid, codec, cat_str);
+        }
+    }
+    printf("└──────────────────────────────────────────────────\n");
+}
+
+#define PES_PREVIEW_FIRST 10u
+#define PES_PREVIEW_LAST  10u
+
+void print_pes_packet_list_report(const pes_packet_list_table_t* table) {
+    for (size_t i = 0; i < table->count; i++) {
+        const pes_packet_list_t* plist = &table->lists[i];
+        const size_t n = plist->count;
+        printf("\n┌────────────────────────────────────────────────── PID 0x%04X (%zu PES)\n",
+            plist->pid, n);
+        if (n == 0u) {
+            printf("└──────────────────────────────────────────────────\n");
+            continue;
+        }
+        const size_t show_first = (n <= PES_PREVIEW_FIRST + PES_PREVIEW_LAST) ? n : PES_PREVIEW_FIRST;
+        const size_t show_last  = (n <= PES_PREVIEW_FIRST + PES_PREVIEW_LAST) ? 0u : PES_PREVIEW_LAST;
+        for (size_t j = 0; j < show_first; j++) {
+            printf("├── PES #%zu of %zu ───────────────────────────────┤\n", j, n);
+            print_pes_header(&plist->packets[j]);
+            print_pts_dts(&plist->packets[j]);
+        }
+        if (show_last > 0u) {
+            printf("│  ... %zu more ...\n", n - show_first - show_last);
+            for (size_t j = n - show_last; j < n; j++) {
+                print_pes_one_line(&plist->packets[j], j);
+            }
+        }
+        printf("└──────────────────────────────────────────────────\n");
+    }
+}
+
+void print_packet_header(ts_packet_t* packet, size_t packet_index) {
     int has_adaptation = (packet->adaptation_field_control & 0x02u) != 0u;
     int has_payload    = (packet->adaptation_field_control & 0x01u) != 0u;
     char buf[64];
 
     printf("\n");
     printf("┌────────────────────────────────────────────────── TS packet\n");
+    snprintf(buf, sizeof buf, "%zu", packet_index);
+    pkt_line("packet_index", buf);
     snprintf(buf, sizeof buf, "0x%02X", packet->sync_byte);
     pkt_line("sync_byte", buf);
     snprintf(buf, sizeof buf, "0x%04X", packet->pid);
@@ -355,6 +652,8 @@ const char* pid_type_to_string(pid_type_t type) {
             return "PAT";
         case PID_PMT:
             return "PMT";
+        case PID_SI:
+            return "SI";
         case PID_VIDEO:
             return "VIDEO";
         case PID_AUDIO:
@@ -425,6 +724,168 @@ void pid_count_list_update_type(pid_count_list_t* list, uint16_t pid, pid_type_t
     }
 }
 
+#define PES_PACKET_LIST_INITIAL_CAPACITY 32u
+
+void pes_packet_list_init(pes_packet_list_t* list) {
+    list->pid = 0;
+    list->packets = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+void pes_packet_list_push(pes_packet_list_t* list, const pes_packet_t* p) {
+    if (list->count >= list->capacity) {
+        size_t new_cap = list->capacity ? list->capacity * 2u : PES_PACKET_LIST_INITIAL_CAPACITY;
+        pes_packet_t* new_packets = (pes_packet_t*)realloc(list->packets, sizeof(pes_packet_t) * new_cap);
+        if (new_packets == NULL) {
+            return;
+        }
+        list->packets = new_packets;
+        list->capacity = new_cap;
+    }
+    list->packets[list->count++] = *p;
+}
+
+void pes_packet_list_cleanup(pes_packet_list_t* list) {
+    free(list->packets);
+    list->packets = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+#define PES_PACKET_LIST_TABLE_INITIAL_CAPACITY 16u
+
+void pes_packet_list_table_init(pes_packet_list_table_t* table) {
+    table->lists = NULL;
+    table->count = 0;
+    table->capacity = 0;
+}
+
+int pes_packet_list_table_find(const pes_packet_list_table_t* table, uint16_t pid) {
+    for (size_t i = 0; i < table->count; i++) {
+        if (table->lists[i].pid == pid) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+pes_packet_list_t* pes_packet_list_table_get_or_create(pes_packet_list_table_t* table, uint16_t pid) {
+    int idx = pes_packet_list_table_find(table, pid);
+    if (idx >= 0) {
+        return &table->lists[(size_t)idx];
+    }
+    if (table->count >= table->capacity) {
+        size_t new_cap = table->capacity ? table->capacity * 2u : PES_PACKET_LIST_TABLE_INITIAL_CAPACITY;
+        pes_packet_list_t* new_lists = (pes_packet_list_t*)realloc(
+            table->lists, sizeof(pes_packet_list_t) * new_cap);
+        if (new_lists == NULL) {
+            return NULL;
+        }
+        table->lists = new_lists;
+        table->capacity = new_cap;
+    }
+    pes_packet_list_t* list = &table->lists[table->count++];
+    pes_packet_list_init(list);
+    list->pid = pid;
+    return list;
+}
+
+void pes_packet_list_table_push_packet(pes_packet_list_table_t* table, uint16_t pid, const pes_packet_t* p) {
+    pes_packet_list_t* list = pes_packet_list_table_get_or_create(table, pid);
+    if (list != NULL) {
+        pes_packet_list_push(list, p);
+    }
+}
+
+void pes_packet_list_table_cleanup(pes_packet_list_table_t* table) {
+    for (size_t i = 0; i < table->count; i++) {
+        pes_packet_list_cleanup(&table->lists[i]);
+    }
+    free(table->lists);
+    table->lists = NULL;
+    table->count = 0;
+    table->capacity = 0;
+}
+
+#define PES_BUFFER_TABLE_INITIAL_CAPACITY 16u
+#define PES_BUFFER_ENTRY_INITIAL_CAPACITY 64u
+
+static int pes_buffer_table_find(const pes_buffer_table_t* table, uint16_t pid) {
+    for (size_t i = 0; i < table->count; i++) {
+        if (table->entries[i].pid == pid) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+void pes_buffer_table_init(pes_buffer_table_t* table) {
+    table->entries = NULL;
+    table->count = 0;
+    table->capacity = 0;
+}
+
+pes_buffer_entry_t* pes_buffer_table_get_or_create(pes_buffer_table_t* table, uint16_t pid) {
+    int idx = pes_buffer_table_find(table, pid);
+    if (idx >= 0) {
+        return &table->entries[(size_t)idx];
+    }
+    if (table->count >= table->capacity) {
+        size_t new_cap = table->capacity ? table->capacity * 2u : PES_BUFFER_TABLE_INITIAL_CAPACITY;
+        pes_buffer_entry_t* new_entries = (pes_buffer_entry_t*)realloc(
+            table->entries, sizeof(pes_buffer_entry_t) * new_cap);
+        if (new_entries == NULL) {
+            return NULL;
+        }
+        table->entries = new_entries;
+        table->capacity = new_cap;
+    }
+    pes_buffer_entry_t* entry = &table->entries[table->count++];
+    entry->pid = pid;
+    entry->buffer = NULL;
+    entry->length = 0;
+    entry->capacity = 0;
+    return entry;
+}
+
+void pes_buffer_table_append(pes_buffer_entry_t* entry, const uint8_t* data, size_t len) {
+    if (len == 0) {
+        return;
+    }
+    if (entry->length + len > entry->capacity) {
+        size_t new_cap = entry->capacity ? entry->capacity * 2u : PES_BUFFER_ENTRY_INITIAL_CAPACITY;
+        while (new_cap < entry->length + len) {
+            new_cap *= 2u;
+        }
+        uint8_t* new_buf = (uint8_t*)realloc(entry->buffer, new_cap);
+        if (new_buf == NULL) {
+            return;
+        }
+        entry->buffer = new_buf;
+        entry->capacity = new_cap;
+    }
+    memcpy(entry->buffer + entry->length, data, len);
+    entry->length += len;
+}
+
+void pes_buffer_table_clear_length(pes_buffer_entry_t* entry) {
+    entry->length = 0;
+}
+
+void pes_buffer_table_cleanup(pes_buffer_table_t* table) {
+    for (size_t i = 0; i < table->count; i++) {
+        free(table->entries[i].buffer);
+        table->entries[i].buffer = NULL;
+        table->entries[i].length = 0;
+        table->entries[i].capacity = 0;
+    }
+    free(table->entries);
+    table->entries = NULL;
+    table->count = 0;
+    table->capacity = 0;
+}
+
 void print_hexdump(const uint8_t* buffer, size_t length) {
     const size_t width = 16;
     for (size_t i = 0; i < length; i += width) {
@@ -444,4 +905,8 @@ void print_hexdump(const uint8_t* buffer, size_t length) {
         }
         printf("|\n");
     }
+}
+
+uint64_t pcr_to_time(uint64_t pcr_base, uint64_t pcr_ext) {
+    return pcr_base * 300 + pcr_ext;
 }

@@ -7,7 +7,7 @@
       "command": "/bin/zsh",
       "args": [
         "-c",
-        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./parser.c ./utils.c -o ./build/Debug/outDebug"
+        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./ts_pipeline.c ./parser.c ./utils.c -o ./build/Debug/outDebug"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
