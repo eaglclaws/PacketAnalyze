@@ -7,7 +7,7 @@
       "command": "/bin/zsh",
       "args": [
         "-c",
-        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./ts_pipeline.c ./parser.c ./utils.c -o ./build/Debug/outDebug"
+        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./ts_pipeline.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c -o ./build/Debug/outDebug"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -81,7 +81,7 @@
       "command": "/bin/zsh",
       "args": [
         "-c",
-        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./parser_test.c ./parser.c ./utils.c -o ./build/Debug/parser_test"
+        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./parser_test.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c -o ./build/Debug/parser_test"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

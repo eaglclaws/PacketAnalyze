@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* ==== Well-known TS PIDs ==== */
 #define TS_PID_PAT  0x0000u
 #define TS_PID_NULL 0x1FFFu
 
+/* ==== Parsed TS packet fields ==== */
 typedef struct ts_packet_s {
     uint8_t sync_byte;
     uint8_t tei;
@@ -49,6 +51,7 @@ typedef struct ts_packet_s {
     uint16_t payload_length; /* number of payload bytes (0 if no payload) */
 } ts_packet_t;
 
+/* ==== Parsed PSI section common header ==== */
 typedef struct psi_header_s {
     uint8_t table_id;
     uint8_t section_syntax_indicator;
@@ -62,11 +65,13 @@ typedef struct psi_header_s {
 } psi_header_t;
 
 
+/* ==== PAT program mapping ==== */
 typedef struct pat_program_s {
     uint16_t program_number;
     uint16_t pid;
 } pat_program_t;
 
+/* ==== Parsed PAT table ==== */
 typedef struct pat_table_s {
     psi_header_t header;
     size_t capacity;
@@ -75,10 +80,12 @@ typedef struct pat_table_s {
 } pat_table_t;
 
 
+/* Legacy wrapper kept for compatibility. */
 typedef struct pat_s {
     uint16_t* pid_list;
 } pat_t;
 
+/* ==== PMT ES metadata ==== */
 /* Descriptor-derived fields; empty/0 means not present. */
 #define PMT_ES_LANGUAGE_LEN 4  /* ISO 639-2/B 3 chars + NUL */
 
@@ -90,6 +97,7 @@ typedef struct pmt_es_s {
     uint8_t avc_level_idc;    /* from AVC_video_descriptor (0x28), 0 if not present */
 } pmt_es_t;
 
+/* ==== Parsed PMT table entry ==== */
 typedef struct pmt_s {
     uint16_t pcr_pid;
     size_t capacity;
@@ -97,6 +105,7 @@ typedef struct pmt_s {
     pmt_es_t* es_list;
 } pmt_t;
 
+/* ==== Parsed PES header + timing ==== */
 typedef struct pes_packet_s {
     uint32_t packet_start_code_prefix;
     uint8_t stream_id;
@@ -118,6 +127,7 @@ typedef struct pes_packet_s {
     uint64_t dts;  /* valid when PTS_DTS_flags == 3 */
 } pes_packet_t;
 
+/* ==== Collected PES packets by PID ==== */
 typedef struct pes_packet_list_s {
     uint16_t pid;
     pes_packet_t* packets;

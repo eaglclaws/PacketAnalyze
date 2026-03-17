@@ -5,9 +5,19 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * Parsing module:
+ * - TS packet header/adaptation parsing
+ * - PSI (PAT/PMT) section parsing and state updates
+ * - PES header and PTS/DTS extraction
+ */
+
 #define DESCRIPTOR_TAG_ISO_639_LANGUAGE 0x0Au
 #define DESCRIPTOR_TAG_AVC_VIDEO       0x28u
 
+/* ============================================================================
+ * Descriptor parsing helpers
+ * ========================================================================== */
 /* Walk descriptor block [offset, offset+length), parse 0x0A (language) and 0x28 (AVC), fill *out. */
 static void parse_es_descriptors(const uint8_t* buffer, size_t buffer_len, size_t offset, size_t length, pmt_es_t* out) {
     out->language_code[0] = '\0';
@@ -38,6 +48,10 @@ static void parse_es_descriptors(const uint8_t* buffer, size_t buffer_len, size_
         offset += (size_t)len;
     }
 }
+
+/* ============================================================================
+ * TS packet parsing
+ * ========================================================================== */
 static void reset_adaptation_fields(ts_packet_t* packet) {
     packet->adaptation_field_length = 0;
 
@@ -215,6 +229,9 @@ int parse_ts_packet(const uint8_t* buffer, size_t buffer_len, ts_packet_t* packe
     return 1;
 }
 
+/* ============================================================================
+ * PSI parsing (PAT/PMT)
+ * ========================================================================== */
 int parse_psi_header(const uint8_t* buffer, size_t buffer_len, const ts_packet_t* packet, psi_header_t* psi_header) {
     if (buffer == NULL || packet == NULL || psi_header == NULL) {
         return 0;
@@ -290,6 +307,7 @@ int parse_pat_section(const uint8_t* buffer, size_t buffer_len, const psi_header
     return 1;
 }
 
+/* Update PAT/PMT state and PID type classification from one TS packet payload. */
 void process_packet_psi(const uint8_t* buffer, size_t buffer_len, const ts_packet_t* packet,
                         pat_table_t* pat, pmt_t** pmt_table, size_t* pmt_table_capacity, pid_count_list_t* list) {
     pid_count_list_update(list, packet->pid);
@@ -347,6 +365,7 @@ void process_packet_psi(const uint8_t* buffer, size_t buffer_len, const ts_packe
     }
 }
 
+/* Parse PMT ES loop and descriptor-derived metadata into one PMT slot. */
 int parse_pmt_section(const uint8_t* buffer, size_t buffer_len, const psi_header_t* psi_header, pmt_t* pmt) {
     if (buffer == NULL || psi_header == NULL || pmt == NULL) {
         return 0;
@@ -405,6 +424,9 @@ int parse_pmt_section(const uint8_t* buffer, size_t buffer_len, const psi_header
     return 1;
 }
 
+/* ============================================================================
+ * PES parsing
+ * ========================================================================== */
 int parse_pes_header(const uint8_t* buffer, size_t buffer_len, pes_packet_t* out) {
     if (buffer == NULL || out == NULL || buffer_len < 9u) {
         return 0;
