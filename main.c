@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include "gui_entry.h"
 #include "ts_pipeline.h"
 
 static void usage(const char* prog) {
@@ -12,6 +12,7 @@ static void usage(const char* prog) {
     fprintf(stderr, "  %s --hexdump <file> <packet_number> Print hexdump of packet at given number\n", prog);
     fprintf(stderr, "  %s --jitter-test <file>   Print jitter metrics + CLI visualization\n", prog);
     fprintf(stderr, "  %s --pes <file>          Print PES data in program elements\n", prog);
+    fprintf(stderr, "  %s --gui                 Run GUI\n", prog);
 }
 
 int main(int argc, char* argv[]) {
@@ -22,9 +23,15 @@ int main(int argc, char* argv[]) {
     int mode_hexdump = (strcmp(mode, "--hexdump") == 0);
     int mode_jitter_test = (strcmp(mode, "--jitter-test") == 0);
     int mode_pes = (strcmp(mode, "--pes") == 0);
+    int mode_gui = (strcmp(mode, "--gui") == 0);
 
     if (mode_hexdump) {
         if (argc != 4) {
+            usage(argv[0]);
+            return 1;
+        }
+    } else if (mode_gui) {
+        if (argc != 2) {
             usage(argv[0]);
             return 1;
         }
@@ -33,9 +40,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!mode_packets && !mode_psi && !mode_validate && !mode_hexdump && !mode_jitter_test && !mode_pes) {
+    if (!mode_packets && !mode_psi && !mode_validate && !mode_hexdump && !mode_jitter_test && !mode_pes && !mode_gui) {
         usage(argv[0]);
         return 1;
+    }
+
+    if (mode_gui) {
+        argv[1] = NULL;
+        return run_gui(1, argv);
     }
 
     {

@@ -77,7 +77,7 @@ void free_pes_result(ts_pes_result_t* result);
 int analyze_validate(FILE* file, ts_validate_result_t* out);
 void free_validate_result(ts_validate_result_t* result);
 
-int analyze_jitter(FILE* file, ts_jitter_result_t* out);
+int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview);
 void free_jitter_result(ts_jitter_result_t* result);
 
 /* ============================================================================

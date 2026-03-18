@@ -4,10 +4,10 @@
     {
       "label": "build (debug)",
       "type": "shell",
-      "command": "/bin/zsh",
+      "command": "/bin/bash",
       "args": [
         "-c",
-        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./ts_pipeline.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c -o ./build/Debug/outDebug"
+        "mkdir -p ./build/Debug && gcc -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./main.c ./ts_pipeline.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c ./gui_entry.c $(pkg-config --cflags --libs gtk4) -lm -o ./build/Debug/outDebug"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -23,7 +23,7 @@
     {
       "label": "clean",
       "type": "shell",
-      "command": "/bin/zsh",
+      "command": "/bin/bash",
       "args": [
         "-c",
         "rm -rf ./build/Debug"
@@ -36,7 +36,7 @@
     {
       "label": "run with less (current file)",
       "type": "shell",
-      "command": "/bin/zsh",
+      "command": "/bin/bash",
       "args": [
         "-c",
         "./build/Debug/outDebug --packets \"${file}\" | less -S"
@@ -51,7 +51,7 @@
     {
       "label": "run with less (control.ts)",
       "type": "shell",
-      "command": "/bin/zsh",
+      "command": "/bin/bash",
       "args": [
         "-c",
         "./build/Debug/outDebug --packets ./control.ts | less -S"
@@ -78,10 +78,10 @@
     {
       "label": "build parser tests",
       "type": "shell",
-      "command": "/bin/zsh",
+      "command": "/bin/bash",
       "args": [
         "-c",
-        "mkdir -p ./build/Debug && clang -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./parser_test.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c -o ./build/Debug/parser_test"
+        "mkdir -p ./build/Debug && gcc -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align -Wconversion -Wsign-conversion -Wnull-dereference -g3 -O0 ./parser_test.c ./parser.c ./utils.c ./utils_store.c ./utils_print.c -o ./build/Debug/parser_test"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

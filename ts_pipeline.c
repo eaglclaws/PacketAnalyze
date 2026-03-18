@@ -95,6 +95,7 @@ typedef struct jitter_preview_ctx_s {
     size_t pcr_sample_total;
     size_t pcr_sample_index;
     int first_found;
+    int full_preview;
     ts_jitter_preview_row_t* rows;
     size_t row_count;
     size_t row_capacity;
@@ -244,7 +245,7 @@ static int jitter_preview_handler(const uint8_t* raw, const ts_packet_t* packet,
             const size_t tail_start = (state->pcr_sample_total > JITTER_PREVIEW_TAIL)
                 ? (state->pcr_sample_total - JITTER_PREVIEW_TAIL) : 0u;
             const int in_tail = (state->pcr_sample_index >= tail_start);
-            if (in_head || in_tail) {
+            if (state->full_preview || in_head || in_tail) {
                 if (!jitter_preview_push_row(state, packet_index,
                                              actual_time_seconds * 1000.0,
                                              ideal_time_seconds * 1000.0,
@@ -508,8 +509,9 @@ void free_validate_result(ts_validate_result_t* result) {
     result->undefined_pid_count = 0;
 }
 
-/* Analyze jitter metrics and preview rows without rendering. */
-int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
+/* Analyze jitter metrics and preview rows without rendering.
+ * If full_preview != 0, all PCR samples are included; otherwise only head+tail. */
+int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview) {
     if (file == NULL || out == NULL) {
         return 1;
     }
@@ -614,6 +616,7 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         preview_ctx.pcr_sample_total = out->pcr_sample_total;
         preview_ctx.pcr_sample_index = 0;
         preview_ctx.first_found = 0;
+        preview_ctx.full_preview = (full_preview != 0);
         preview_ctx.rows = NULL;
         preview_ctx.row_count = 0;
         preview_ctx.row_capacity = 0;
@@ -711,7 +714,7 @@ int run_mode_hexdump(FILE* file, long packet_number) {
 
 int run_mode_jitter_test(FILE* file) {
     ts_jitter_result_t result;
-    if (analyze_jitter(file, &result) != 0) {
+    if (analyze_jitter(file, &result, 0) != 0) {
         printf("Unable to determine PMT/PCR PID.\n");
         return 1;
     }
