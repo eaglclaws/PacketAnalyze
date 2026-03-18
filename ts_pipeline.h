@@ -32,7 +32,7 @@ typedef struct ts_packets_result_s {
 
 typedef struct ts_pes_result_s {
     ts_psi_result_t psi;
-    pes_packet_list_table_t pes_packets;
+    pes_packet_list_table_t pes_packet_table;
 } ts_pes_result_t;
 
 typedef struct ts_validate_result_s {

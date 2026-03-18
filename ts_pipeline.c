@@ -381,7 +381,7 @@ int analyze_pes(FILE* file, ts_pes_result_t* out) {
         return 1;
     }
 
-    pes_packet_list_table_init(&out->pes_packets);
+    pes_packet_list_table_init(&out->pes_packet_table);
 
     {
         pes_packet_t pes_packet;
@@ -392,7 +392,7 @@ int analyze_pes(FILE* file, ts_pes_result_t* out) {
             .pmt_table = &out->psi.pmt_table,
             .pmt_table_capacity = &out->psi.pmt_table_capacity,
             .pid_list = &out->psi.pid_list,
-            .pes_packet_table = &out->pes_packets,
+            .pes_packet_table = &out->pes_packet_table,
             .pes_buffer_table = &pes_buffer_table,
             .pes_packet = &pes_packet,
             .had_error = 0
@@ -401,7 +401,7 @@ int analyze_pes(FILE* file, ts_pes_result_t* out) {
         rewind(file);
         if (!walk_ts_packets(file, pes_pass2_collect_handler, &pes_ctx) || pes_ctx.had_error) {
             pes_buffer_table_cleanup(&pes_buffer_table);
-            pes_packet_list_table_cleanup(&out->pes_packets);
+            pes_packet_list_table_cleanup(&out->pes_packet_table);
             free_psi_result(&out->psi);
             return 1;
         }
@@ -416,7 +416,7 @@ void free_pes_result(ts_pes_result_t* result) {
     if (result == NULL) {
         return;
     }
-    pes_packet_list_table_cleanup(&result->pes_packets);
+    pes_packet_list_table_cleanup(&result->pes_packet_table);
     free_psi_result(&result->psi);
 }
 
@@ -756,7 +756,7 @@ int run_mode_pes(FILE* file) {
         return 1;
     }
     print_pes_streams_summary(result.psi.pmt_table, result.psi.pmt_table_capacity);
-    print_pes_packet_list_report(&result.pes_packets);
+    print_pes_packet_list_report(&result.pes_packet_table);
     free_pes_result(&result);
     return 0;
 }
