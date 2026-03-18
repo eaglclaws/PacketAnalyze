@@ -1,8 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "gui_entry.h"
 #include "ts_pipeline.h"
+
+/* Return 1 if path has extension .ts, .tp, or .m2ts (case-insensitive). */
+static int path_is_ts_file(const char* path) {
+    const char* dot = strrchr(path, '.');
+    if (!dot || dot == path) return 0;
+    const char* ext = dot + 1;
+    if (strcasecmp(ext, "ts") == 0) return 1;
+    if (strcasecmp(ext, "tp") == 0) return 1;
+    if (strcasecmp(ext, "m2ts") == 0) return 1;
+    return 0;
+}
 
 static void usage(const char* prog) {
     fprintf(stderr, "Usage:\n");
@@ -52,6 +64,10 @@ int main(int argc, char* argv[]) {
 
     {
         const char* path = argv[2];
+        if (!path_is_ts_file(path)) {
+            fprintf(stderr, "Only transport stream files are supported (.ts, .tp, .m2ts): %s\n", path);
+            return 1;
+        }
         FILE* file = fopen(path, "rb");
         int rc = 0;
         if (!file) {
