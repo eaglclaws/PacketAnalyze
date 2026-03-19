@@ -785,7 +785,7 @@ static void show_hexdump_popup(const char* path, size_t packet_index, GtkWindow*
     }
     gtk_window_set_title(GTK_WINDOW(win), "Packet hex dump");
     /* Just wide enough for 77 chars; height fits ~12 lines + header */
-    gtk_window_set_default_size(GTK_WINDOW(win), 570, 230);
+    gtk_window_set_default_size(GTK_WINDOW(win), 610, 300);
 
     GtkWidget* content = create_popup_content_box();
     {
@@ -798,8 +798,8 @@ static void show_hexdump_popup(const char* path, size_t packet_index, GtkWindow*
     GtkWidget* scrolled = gtk_scrolled_window_new();
     gtk_widget_add_css_class(scrolled, "popup-card");
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 530);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 150);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 570);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 220);
 
     GtkWidget* view = gtk_text_view_new();
     gtk_widget_add_css_class(view, "hexdump-view");
