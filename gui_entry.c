@@ -23,9 +23,6 @@ typedef struct {
     GtkWidget* jitter_btn;
     GtkWidget* pes_info_btn;
     GtkWidget* loading_label;
-    GtkWidget* loading_spinner;
-    GtkWidget* loading_progress;
-    guint loading_pulse_timeout_id;
     char* current_path;
 } gui_file_ctx_t;
 
@@ -259,6 +256,20 @@ static GtkWidget* create_popup_content_box(void) {
     gtk_widget_set_margin_start(box, 14);
     gtk_widget_set_margin_end(box, 14);
     return box;
+}
+
+static gboolean main_window_deferred_destroy_cb(gpointer user_data) {
+    GtkWindow* win = GTK_WINDOW(user_data);
+    gtk_window_destroy(win);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean on_main_window_close_request(GtkWindow* win, gpointer user_data) {
+    (void)user_data;
+    /* Hide immediately for responsive UX, then run normal destroy on idle. */
+    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+    g_idle_add(main_window_deferred_destroy_cb, win);
+    return TRUE;
 }
 
 static GtkWidget* create_popup_header(const char* title_text, const char* subtitle_text) {
@@ -1159,13 +1170,6 @@ static gboolean apply_open_result(gpointer data) {
     if (!r) return G_SOURCE_REMOVE;
     gui_file_ctx_t* ctx = r->ctx;
 
-    if (ctx->loading_pulse_timeout_id != 0) {
-        g_source_remove(ctx->loading_pulse_timeout_id);
-        ctx->loading_pulse_timeout_id = 0;
-    }
-    if (ctx->loading_spinner)
-        gtk_spinner_set_spinning(GTK_SPINNER(ctx->loading_spinner), FALSE);
-
     if (!r->success) {
         gtk_stack_set_visible_child_name(GTK_STACK(ctx->content_stack), "empty");
         if (r->path) g_free(r->path);
@@ -1284,15 +1288,6 @@ static gpointer load_file_worker(gpointer data) {
     return NULL;
 }
 
-static gboolean loading_pulse_cb(gpointer user_data) {
-    gui_file_ctx_t* ctx = (gui_file_ctx_t*)user_data;
-    if (ctx->loading_progress) {
-        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ctx->loading_progress));
-        gtk_widget_queue_draw(ctx->loading_progress);
-    }
-    return G_SOURCE_CONTINUE;
-}
-
 static void on_file_open_callback(GObject* source, GAsyncResult* result, gpointer user_data) {
     gui_file_ctx_t* ctx = (gui_file_ctx_t*)user_data;
     GtkFileDialog* dialog = GTK_FILE_DIALOG(source);
@@ -1326,20 +1321,11 @@ static void on_file_open_callback(GObject* source, GAsyncResult* result, gpointe
     g_free(loading_text);
 
     gtk_stack_set_visible_child_name(GTK_STACK(ctx->content_stack), "loading");
-    if (ctx->loading_spinner)
-        gtk_spinner_set_spinning(GTK_SPINNER(ctx->loading_spinner), TRUE);
-    ctx->loading_pulse_timeout_id = g_timeout_add_full(G_PRIORITY_HIGH, 120, (GSourceFunc)loading_pulse_cb, ctx, NULL);
 
     load_file_data_t* ld = (load_file_data_t*)malloc(sizeof(load_file_data_t));
     if (!ld) {
         g_free(path);
         gtk_stack_set_visible_child_name(GTK_STACK(ctx->content_stack), "empty");
-        if (ctx->loading_spinner)
-            gtk_spinner_set_spinning(GTK_SPINNER(ctx->loading_spinner), FALSE);
-        if (ctx->loading_pulse_timeout_id != 0) {
-            g_source_remove(ctx->loading_pulse_timeout_id);
-            ctx->loading_pulse_timeout_id = 0;
-        }
         return;
     }
     ld->path = path;
@@ -1368,6 +1354,7 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
     (void)user_data;
     printf("Activating\n");
     GtkWidget* window = gtk_application_window_new(GTK_APPLICATION(app));
+    g_signal_connect(window, "close-request", G_CALLBACK(on_main_window_close_request), NULL);
     gtk_window_set_title(GTK_WINDOW(window), "Packet Analyzer");
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
 
@@ -1389,7 +1376,6 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
         "label.psi-summary-list-title { font-size: 0.78em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: alpha(@theme_fg_color, 0.66); margin-top: 4px; }\n"
         "label.psi-summary-main { font-family: monospace; font-weight: 600; color: @theme_fg_color; }\n"
         "label.psi-summary-item { font-family: monospace; color: alpha(@theme_fg_color, 0.85); }\n"
-        "progressbar.loading-pulse-bar { min-height: 14px; }\n"
         "box.popup-container { background: transparent; }\n"
         "label.popup-title { font-size: 1.15em; font-weight: 700; }\n"
         "label.popup-subtitle { color: alpha(@theme_fg_color, 0.65); }\n"
@@ -1451,19 +1437,12 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
 
     GtkWidget* loading_page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_vexpand(loading_page, TRUE);
-    GtkWidget* loading_center = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    GtkWidget* loading_spinner = gtk_spinner_new();
+    GtkWidget* loading_center = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     GtkWidget* loading_label = gtk_label_new("Loading…");
-    GtkWidget* loading_progress = gtk_progress_bar_new();
-    gtk_widget_add_css_class(loading_progress, "loading-pulse-bar");
-    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(loading_progress), FALSE);
-    gtk_widget_set_size_request(loading_progress, 280, 14);
     gtk_widget_set_halign(loading_center, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(loading_center, GTK_ALIGN_CENTER);
     gtk_widget_set_vexpand(loading_center, TRUE);
-    gtk_box_append(GTK_BOX(loading_center), loading_spinner);
     gtk_box_append(GTK_BOX(loading_center), loading_label);
-    gtk_box_append(GTK_BOX(loading_center), loading_progress);
     gtk_box_append(GTK_BOX(loading_page), loading_center);
     gtk_stack_add_titled(GTK_STACK(content_stack), loading_page, "loading", "loading");
 
@@ -1509,9 +1488,6 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
     file_ctx.jitter_btn = jitter_btn;
     file_ctx.pes_info_btn = pes_info_btn;
     file_ctx.loading_label = loading_label;
-    file_ctx.loading_spinner = loading_spinner;
-    file_ctx.loading_progress = loading_progress;
-    file_ctx.loading_pulse_timeout_id = 0;
     file_ctx.current_path = NULL;
     g_signal_connect(open_btn, "clicked", G_CALLBACK(on_open_file_clicked), &file_ctx);
     g_signal_connect(stats_btn, "clicked", G_CALLBACK(on_stats_clicked), &file_ctx);

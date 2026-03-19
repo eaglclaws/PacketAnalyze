@@ -242,7 +242,7 @@ int parse_psi_header(const uint8_t* buffer, size_t buffer_len, const ts_packet_t
     if (packet->payload_offset >= buffer_len) {
         return 0;
     }
-    if (packet->payload_offset + 1 > buffer_len) {
+    if ((size_t)(packet->payload_offset + 1) > buffer_len) {
         return 0;
     }
     size_t table_start = 0;
