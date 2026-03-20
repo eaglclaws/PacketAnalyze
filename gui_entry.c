@@ -70,6 +70,7 @@ typedef struct {
     ts_packets_result_t result_data;
     char** psi_summaries;
     size_t program_count;
+    size_t sync_loss_count;
     char* path;
     gui_file_ctx_t* ctx;
     int success;
@@ -498,8 +499,6 @@ static void on_jitter_clicked(GtkWidget* button, gpointer user_data) {
     JR("First byte offset", buf);
     snprintf(buf, sizeof buf, "%zu", result->last_byte_offset);
     JR("Last byte offset", buf);
-    snprintf(buf, sizeof buf, "%zu (omitted %zu)", result->preview_row_count, result->preview_rows_omitted);
-    JR("Preview rows", buf);
 #undef JR
     gtk_box_append(GTK_BOX(vbox), grid);
 
@@ -1221,6 +1220,17 @@ static gboolean apply_open_result(gpointer data) {
     gtk_widget_set_visible(ctx->jitter_btn, TRUE);
     gtk_widget_set_visible(ctx->pes_info_btn, TRUE);
     gtk_stack_set_visible_child_name(GTK_STACK(ctx->content_stack), "list");
+    if (r->sync_loss_count > 0u) {
+        GtkAlertDialog* alert = gtk_alert_dialog_new("Sync loss detected in input stream.");
+        char detail[256];
+        snprintf(detail, sizeof detail,
+                 "%zu sync loss event(s) were detected.\n"
+                 "Decoded packet fields may be unreliable because the parser assumes aligned 188-byte packets (no resync).",
+                 r->sync_loss_count);
+        gtk_alert_dialog_set_detail(alert, detail);
+        gtk_alert_dialog_choose(alert, ctx->window, NULL, NULL, NULL);
+        g_object_unref(alert);
+    }
     free(r);
     return G_SOURCE_REMOVE;
 }
@@ -1282,6 +1292,16 @@ static gpointer load_file_worker(gpointer data) {
     }
     r->program_count = psi_result.pat.program_count;
     free_psi_result(&psi_result);
+
+    rewind(f);
+    {
+        ts_validate_result_t validate_result;
+        if (analyze_validate(f, &validate_result) == 0) {
+            r->sync_loss_count = validation_summary_sync_errors();
+            free_validate_result(&validate_result);
+        }
+    }
+
     fclose(f);
     r->success = 1;
     g_idle_add((GSourceFunc)apply_open_result, r);

@@ -25,6 +25,9 @@ static void usage(const char* prog) {
     fprintf(stderr, "  %s --jitter-test <file>   Print jitter metrics + CLI visualization\n", prog);
     fprintf(stderr, "  %s --pes <file>          Print PES data in program elements\n", prog);
     fprintf(stderr, "  %s --gui                 Run GUI\n", prog);
+    fprintf(stderr, "\nInput contract:\n");
+    fprintf(stderr, "  - Expects aligned 188-byte TS packets from byte 0 (sync byte 0x47)\n");
+    fprintf(stderr, "  - No stream resynchronization is performed\n");
 }
 
 int main(int argc, char* argv[]) {

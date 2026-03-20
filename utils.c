@@ -80,6 +80,10 @@ size_t validation_summary_total_errors(void) {
     return s_validation_sync_errors + s_validation_cc_errors;
 }
 
+size_t validation_summary_sync_errors(void) {
+    return s_validation_sync_errors;
+}
+
 void validation_summary_print(FILE* out) {
     size_t cc_affected_pid_count = 0;
     for (size_t pid = 0; pid < MAX_PID; pid++) {

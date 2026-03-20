@@ -102,6 +102,8 @@ void validation_summary_init(void);
 void validation_summary_print(FILE* out);
 /* Total errors currently accumulated in validation summary state. */
 size_t validation_summary_total_errors(void);
+/* Sync-loss count currently accumulated in validation summary state. */
+size_t validation_summary_sync_errors(void);
 
 /* Update continuity tracking state after packet validation. */
 void ts_cc_update(const ts_packet_t* packet);

@@ -17,8 +17,8 @@
  */
 
 #define PACKET_SIZE 188
-#define JITTER_PREVIEW_HEAD 40u
-#define JITTER_PREVIEW_TAIL 40u
+#define JITTER_PREVIEW_HEAD 20u
+#define JITTER_PREVIEW_TAIL 20u
 
 /* ============================================================================
  * Jitter preview rendering
@@ -650,9 +650,20 @@ void free_jitter_result(ts_jitter_result_t* result) {
  * CLI runner wrappers
  * ========================================================================== */
 int run_mode_packets(FILE* file) {
+    size_t sync_loss_count = 0;
+    ts_validate_result_t validate_result;
+    if (analyze_validate(file, &validate_result) == 0) {
+        sync_loss_count = validation_summary_sync_errors();
+        free_validate_result(&validate_result);
+    }
+
     ts_packets_result_t result;
     if (analyze_packets(file, &result) != 0) {
         return 1;
+    }
+    if (sync_loss_count > 0u) {
+        printf("WARNING: %zu sync loss event(s) detected. Decoded packet fields may be unreliable.\n", sync_loss_count);
+        printf("         Input contract is aligned 188-byte TS from byte 0 (no resync).\n\n");
     }
     print_pid_ratio_header(&result.pid_list, (long)result.packet_count);
     for (size_t i = 0; i < result.packet_count; i++) {
