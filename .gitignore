@@ -56,3 +56,6 @@ dkms.conf
 
 # auxilary files
 *.ts
+
+build/
+docs/
