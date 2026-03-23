@@ -1,0 +1,23 @@
+# LeakSanitizer suppressions for known external GUI toolkit allocations.
+# These are intended for GTK GUI smoke runs where process-lifetime caches
+# in dependencies can appear as leaks at shutdown.
+#
+# Also includes common GL/driver and IPC stacks: we cannot fix third-party
+# allocations (e.g. NVIDIA proprietary drivers, D-Bus internals).
+
+leak:libgtk-4.so
+leak:libpango-1.0.so
+leak:libpangocairo-1.0.so
+leak:libfontconfig.so
+leak:FcValueSave
+leak:pango_layout_new
+leak:gtk_widget_measure
+
+# NVIDIA proprietary GL stack (version suffix e.g. .580.126.18 is stripped in reports)
+leak:libnvidia-glcore
+leak:libnvidia-glsi
+
+# D-Bus (often pulled in via session bus / GL / portal paths during GUI init)
+leak:libdbus-1.so
+leak:_dbus_string_copy_len
+leak:_dbus_connection_do_iteration_unlocked

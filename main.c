@@ -24,13 +24,19 @@ static void usage(const char* prog) {
     fprintf(stderr, "  %s --hexdump <file> <packet_number> Print hexdump of packet at given number\n", prog);
     fprintf(stderr, "  %s --jitter-test <file>   Print jitter metrics + CLI visualization\n", prog);
     fprintf(stderr, "  %s --pes <file>          Print PES data in program elements\n", prog);
-    fprintf(stderr, "  %s --gui                 Run GUI\n", prog);
+    fprintf(stderr, "  %s --gui                 Run GUI (same as running with no arguments)\n", prog);
+    fprintf(stderr, "  %s                       Run GUI when given no arguments (e.g. double-click in a file manager)\n", prog);
     fprintf(stderr, "\nInput contract:\n");
     fprintf(stderr, "  - Expects aligned 188-byte TS packets from byte 0 (sync byte 0x47)\n");
     fprintf(stderr, "  - No stream resynchronization is performed\n");
 }
 
 int main(int argc, char* argv[]) {
+    /* No args: launch GUI (typical when double-clicking the binary in a file manager). */
+    if (argc == 1) {
+        return run_gui(1, argv);
+    }
+
     const char* mode = (argc >= 2) ? argv[1] : "";
     int mode_packets = (strcmp(mode, "--packets") == 0);
     int mode_psi = (strcmp(mode, "--psi-analyze") == 0);
