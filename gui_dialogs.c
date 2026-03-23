@@ -104,12 +104,13 @@ void gui_show_hexdump_popup(const char* path, size_t packet_index, GtkWindow* pa
 
     GtkWidget* scrolled = gtk_scrolled_window_new();
     gtk_widget_add_css_class(scrolled, "popup-card");
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_NEVER);
     gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 570);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 220);
 
     GtkWidget* view = gtk_text_view_new();
     gtk_widget_add_css_class(view, "hexdump-view");
+    gtk_widget_set_size_request(view, -1, 144);
     gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
     gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), GTK_WRAP_NONE);

@@ -26,6 +26,7 @@ LDLIBS := -lm
 
 APP_SRCS := main.c ts_pipeline.c parser.c utils.c utils_store.c utils_print.c gui_entry.c gui_dialogs.c gui_packet_widgets.c gui_packet_list.c
 PARSER_TEST_SRCS := parser_test.c parser.c utils.c utils_store.c utils_print.c
+ALL_HDRS := $(wildcard *.h)
 
 .PHONY: all debug release sanitize parser_test parser_test_sanitize clean \
 	run run_release run_sanitize run_sanitize_gui regress regress_sanitize help
@@ -42,25 +43,25 @@ parser_test: $(PARSER_TEST_DEBUG)
 
 parser_test_sanitize: $(PARSER_TEST_SAN)
 
-$(APP_DEBUG): $(APP_SRCS)
+$(APP_DEBUG): $(APP_SRCS) $(ALL_HDRS)
 	@mkdir -p "$(DEBUG_DIR)"
-	$(CC) $(DEBUG_CFLAGS) $(GTK_CFLAGS) $^ $(GTK_LIBS) $(LDLIBS) -o "$@"
+	$(CC) $(DEBUG_CFLAGS) $(GTK_CFLAGS) $(APP_SRCS) $(GTK_LIBS) $(LDLIBS) -o "$@"
 
-$(APP_RELEASE): $(APP_SRCS)
+$(APP_RELEASE): $(APP_SRCS) $(ALL_HDRS)
 	@mkdir -p "$(RELEASE_DIR)"
-	$(CC) $(RELEASE_CFLAGS) $(GTK_CFLAGS) $^ $(GTK_LIBS) $(LDLIBS) -o "$@"
+	$(CC) $(RELEASE_CFLAGS) $(GTK_CFLAGS) $(APP_SRCS) $(GTK_LIBS) $(LDLIBS) -o "$@"
 
-$(APP_SAN): $(APP_SRCS)
+$(APP_SAN): $(APP_SRCS) $(ALL_HDRS)
 	@mkdir -p "$(SAN_DIR)"
-	$(CC) $(SAN_CFLAGS) $(GTK_CFLAGS) $^ $(GTK_LIBS) $(LDLIBS) -o "$@"
+	$(CC) $(SAN_CFLAGS) $(GTK_CFLAGS) $(APP_SRCS) $(GTK_LIBS) $(LDLIBS) -o "$@"
 
-$(PARSER_TEST_DEBUG): $(PARSER_TEST_SRCS)
+$(PARSER_TEST_DEBUG): $(PARSER_TEST_SRCS) $(ALL_HDRS)
 	@mkdir -p "$(DEBUG_DIR)"
-	$(CC) $(DEBUG_CFLAGS) $^ -o "$@"
+	$(CC) $(DEBUG_CFLAGS) $(PARSER_TEST_SRCS) -o "$@"
 
-$(PARSER_TEST_SAN): $(PARSER_TEST_SRCS)
+$(PARSER_TEST_SAN): $(PARSER_TEST_SRCS) $(ALL_HDRS)
 	@mkdir -p "$(SAN_DIR)"
-	$(CC) $(SAN_CFLAGS) $^ -o "$@"
+	$(CC) $(SAN_CFLAGS) $(PARSER_TEST_SRCS) -o "$@"
 
 run: debug
 	"$(APP_DEBUG)" --gui

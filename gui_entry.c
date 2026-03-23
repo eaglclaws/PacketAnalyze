@@ -387,7 +387,6 @@ static void on_open_file_clicked(GtkWidget* button, gpointer user_data) {
 
 static void on_activate(GtkApplication* app, gpointer user_data) {
     (void)user_data;
-    printf("Activating\n");
     GtkWidget* window = gtk_application_window_new(GTK_APPLICATION(app));
     g_signal_connect(window, "close-request", G_CALLBACK(on_main_window_close_request), NULL);
     gtk_window_set_title(GTK_WINDOW(window), "Packet Analyzer");
@@ -398,7 +397,7 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
     gtk_css_provider_load_from_string(provider,
         "button:hover { background-color: alpha(@theme_fg_color, 0.08); }\n"
         "box.packet-row { border: 1px solid alpha(@theme_fg_color, 0.12); border-radius: 8px; margin: 3px 0; padding: 10px 14px; background-color: alpha(@theme_fg_color, 0.02); }\n"
-        ".packet-row-expander box title expander, .packet-row-expander expander { opacity: 0; min-width: 2px; min-height: 2px; }\n"
+        ".packet-row-expander box title expander, .packet-row-expander expander { opacity: 0; }\n"
         "label.packet-summary { font-weight: 600; font-family: monospace; font-size: 0.95em; letter-spacing: 0.04em; color: alpha(@theme_fg_color, 0.92); }\n"
         "grid.detail-grid { padding: 2px 0; }\n"
         "label.detail-label { font-weight: 600; font-size: 0.8em; letter-spacing: 0.06em; text-transform: uppercase; color: alpha(@theme_fg_color, 0.55); min-width: 11em; }\n"
@@ -540,7 +539,6 @@ static void on_activate(GtkApplication* app, gpointer user_data) {
 }
 
 int run_gui(int argc, char* argv[]) {
-    printf("Running GUI\n");
     GtkApplication* app = gtk_application_new("org.sukhyeon.packet-analyzer", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
