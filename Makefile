@@ -1,6 +1,10 @@
 CC := gcc
 PKG_CONFIG := pkg-config
 
+SRCDIR := src
+INCDIR := include
+INC_FLAGS := -I$(INCDIR)
+
 OUT_DIR := build
 DEBUG_DIR := $(OUT_DIR)/Debug
 RELEASE_DIR := $(OUT_DIR)/Release
@@ -15,7 +19,7 @@ PARSER_TEST_SAN := $(SAN_DIR)/parser_test
 
 COMMON_WARN := -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align \
 	-Wconversion -Wsign-conversion -Wnull-dereference
-COMMON_CFLAGS := $(COMMON_WARN)
+COMMON_CFLAGS := $(COMMON_WARN) $(INC_FLAGS)
 DEBUG_CFLAGS := $(COMMON_CFLAGS) -g3 -O0
 RELEASE_CFLAGS := $(COMMON_CFLAGS) -O2 -DNDEBUG
 SAN_CFLAGS := $(DEBUG_CFLAGS) -fno-omit-frame-pointer -fsanitize=address,undefined
@@ -24,9 +28,12 @@ GTK_CFLAGS := $(shell $(PKG_CONFIG) --cflags gtk4)
 GTK_LIBS := $(shell $(PKG_CONFIG) --libs gtk4)
 LDLIBS := -lm
 
-APP_SRCS := main.c ts_pipeline.c parser.c utils.c utils_store.c utils_print.c gui_entry.c gui_dialogs.c gui_packet_widgets.c gui_packet_list.c
-PARSER_TEST_SRCS := parser_test.c parser.c utils.c utils_store.c utils_print.c
-ALL_HDRS := $(wildcard *.h)
+APP_SRCS := $(SRCDIR)/main.c $(SRCDIR)/ts_pipeline.c $(SRCDIR)/parser.c $(SRCDIR)/utils.c \
+	$(SRCDIR)/utils_store.c $(SRCDIR)/utils_print.c $(SRCDIR)/gui_entry.c $(SRCDIR)/gui_dialogs.c \
+	$(SRCDIR)/gui_packet_widgets.c $(SRCDIR)/gui_packet_list.c
+PARSER_TEST_SRCS := $(SRCDIR)/parser_test.c $(SRCDIR)/parser.c $(SRCDIR)/utils.c \
+	$(SRCDIR)/utils_store.c $(SRCDIR)/utils_print.c
+ALL_HDRS := $(wildcard $(INCDIR)/*.h)
 
 .PHONY: all debug release sanitize parser_test parser_test_sanitize clean \
 	run run_release run_sanitize run_sanitize_gui regress regress_sanitize help

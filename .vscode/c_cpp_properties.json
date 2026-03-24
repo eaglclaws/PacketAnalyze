@@ -3,6 +3,7 @@
     {
       "name": "macos-clang-arm64",
       "includePath": [
+        "${workspaceFolder}/include",
         "${workspaceFolder}/**"
       ],
       "compilerPath": "/usr/bin/clang",
