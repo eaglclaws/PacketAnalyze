@@ -137,10 +137,8 @@ typedef struct pcr_collect_ctx_s {
 } pcr_collect_ctx_t;
 
 typedef struct pes_walk_ctx_s {
-    pat_table_t* pat;
     pmt_t** pmt_table;
     size_t* pmt_table_capacity;
-    pid_count_list_t* pid_list;
     pes_packet_list_table_t* pes_packet_table;
     pes_buffer_table_t* pes_buffer_table;
     pes_packet_t* pes_packet;
@@ -164,6 +162,11 @@ static int walk_ts_packets(FILE* file, ts_packet_handler_fn handler, void* ctx) 
     return 1;
 }
 
+static int rewind_and_walk_ts_packets(FILE* file, ts_packet_handler_fn handler, void* ctx) {
+    rewind(file);
+    return walk_ts_packets(file, handler, ctx);
+}
+
 static int pmt_contains_es_pid(const pmt_t* pmt_table, size_t pmt_table_capacity, uint16_t pid) {
     for (size_t i = 0; i < pmt_table_capacity; i++) {
         for (size_t j = 0; j < pmt_table[i].es_count; j++) {
@@ -178,15 +181,29 @@ static int pmt_contains_es_pid(const pmt_t* pmt_table, size_t pmt_table_capacity
 /* ============================================================================
  * Packet handlers (reused by mode runners)
  * ========================================================================== */
+static int ensure_buffer_capacity(void** buffer, size_t elem_size,
+                                  size_t count, size_t* capacity,
+                                  size_t initial_capacity) {
+    if (buffer == NULL || capacity == NULL || elem_size == 0u || initial_capacity == 0u) {
+        return 0;
+    }
+    if (count < *capacity) {
+        return 1;
+    }
+    size_t new_cap = *capacity == 0u ? initial_capacity : (*capacity * 2u);
+    void* new_buffer = realloc(*buffer, elem_size * new_cap);
+    if (new_buffer == NULL) {
+        return 0;
+    }
+    *buffer = new_buffer;
+    *capacity = new_cap;
+    return 1;
+}
+
 static int packets_result_append(ts_packets_result_t* out, const ts_packet_t* packet) {
-    if (out->packet_count == out->packet_capacity) {
-        size_t new_cap = out->packet_capacity == 0u ? 1024u : out->packet_capacity * 2u;
-        ts_packet_t* new_packets = (ts_packet_t*)realloc(out->packets, sizeof(ts_packet_t) * new_cap);
-        if (new_packets == NULL) {
-            return 0;
-        }
-        out->packets = new_packets;
-        out->packet_capacity = new_cap;
+    if (!ensure_buffer_capacity((void**)&out->packets, sizeof(ts_packet_t),
+                                out->packet_count, &out->packet_capacity, 1024u)) {
+        return 0;
     }
     out->packets[out->packet_count++] = *packet;
     return 1;
@@ -241,14 +258,9 @@ static int jitter_stats_handler(const uint8_t* raw, const ts_packet_t* packet, s
 }
 
 static int pcr_collect_append(pcr_collect_ctx_t* c, size_t byte_offset, uint64_t pcr) {
-    if (c->count == c->capacity) {
-        size_t new_cap = c->capacity == 0u ? 128u : c->capacity * 2u;
-        pcr_sample_t* p = (pcr_sample_t*)realloc(c->samples, sizeof(pcr_sample_t) * new_cap);
-        if (p == NULL) {
-            return 0;
-        }
-        c->samples = p;
-        c->capacity = new_cap;
+    if (!ensure_buffer_capacity((void**)&c->samples, sizeof(pcr_sample_t),
+                                c->count, &c->capacity, 128u)) {
+        return 0;
     }
     c->samples[c->count].byte_offset = byte_offset;
     c->samples[c->count].pcr = pcr;
@@ -301,15 +313,9 @@ static int jitter_preview_push_row(jitter_preview_ctx_t* state, size_t packet_in
                                    double actual_ms, int actual_valid,
                                    double ideal_ms, int ideal_valid,
                                    double offset_ms, int offset_valid) {
-    if (state->row_count == state->row_capacity) {
-        size_t new_cap = state->row_capacity == 0u ? 128u : state->row_capacity * 2u;
-        ts_jitter_preview_row_t* new_rows =
-            (ts_jitter_preview_row_t*)realloc(state->rows, sizeof(ts_jitter_preview_row_t) * new_cap);
-        if (new_rows == NULL) {
-            return 0;
-        }
-        state->rows = new_rows;
-        state->row_capacity = new_cap;
+    if (!ensure_buffer_capacity((void**)&state->rows, sizeof(ts_jitter_preview_row_t),
+                                state->row_count, &state->row_capacity, 128u)) {
+        return 0;
     }
     state->rows[state->row_count].packet_index = packet_index;
     state->rows[state->row_count].actual_ms = actual_ms;
@@ -495,18 +501,15 @@ int analyze_pes(FILE* file, ts_pes_result_t* out) {
         pes_buffer_table_t pes_buffer_table;
         pes_buffer_table_init(&pes_buffer_table);
         pes_walk_ctx_t pes_ctx = {
-            .pat = &out->psi.pat,
             .pmt_table = &out->psi.pmt_table,
             .pmt_table_capacity = &out->psi.pmt_table_capacity,
-            .pid_list = &out->psi.pid_list,
             .pes_packet_table = &out->pes_packet_table,
             .pes_buffer_table = &pes_buffer_table,
             .pes_packet = &pes_packet,
             .had_error = 0
         };
 
-        rewind(file);
-        if (!walk_ts_packets(file, pes_pass2_collect_handler, &pes_ctx) || pes_ctx.had_error) {
+        if (!rewind_and_walk_ts_packets(file, pes_pass2_collect_handler, &pes_ctx) || pes_ctx.had_error) {
             pes_buffer_table_cleanup(&pes_buffer_table);
             pes_packet_list_table_cleanup(&out->pes_packet_table);
             free_psi_result(&out->psi);
@@ -617,6 +620,8 @@ void free_validate_result(ts_validate_result_t* result) {
 
 /* Analyze jitter metrics and rows without rendering. */
 int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
+    uint16_t* candidates = NULL;
+    size_t* candidate_counts = NULL;
     if (file == NULL || out == NULL) {
         return 1;
     }
@@ -625,19 +630,15 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         return 1;
     }
     if (out->psi.pmt_table == NULL || out->psi.pmt_table_capacity == 0) {
-        free_psi_result(&out->psi);
-        return 1;
+        goto fail;
     }
 
     {
-        uint16_t* candidates = (uint16_t*)malloc(sizeof(uint16_t) * out->psi.pmt_table_capacity);
-        size_t* candidate_counts = (size_t*)malloc(sizeof(size_t) * out->psi.pmt_table_capacity);
+        candidates = (uint16_t*)malloc(sizeof(uint16_t) * out->psi.pmt_table_capacity);
+        candidate_counts = (size_t*)malloc(sizeof(size_t) * out->psi.pmt_table_capacity);
         size_t candidate_count = 0;
         if (candidates == NULL || candidate_counts == NULL) {
-            free(candidates);
-            free(candidate_counts);
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
         for (size_t i = 0; i < out->psi.pmt_table_capacity; i++) {
             uint16_t candidate = out->psi.pmt_table[i].pcr_pid;
@@ -649,19 +650,12 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
             if (!exists) candidates[candidate_count++] = candidate;
         }
         if (candidate_count == 0) {
-            free(candidates);
-            free(candidate_counts);
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
         for (size_t i = 0; i < candidate_count; i++) {
             pcr_count_ctx_t count_ctx = {.target_pid = candidates[i], .count = 0};
-            rewind(file);
-            if (!walk_ts_packets(file, pcr_count_handler, &count_ctx)) {
-                free(candidates);
-                free(candidate_counts);
-                free_psi_result(&out->psi);
-                return 1;
+            if (!rewind_and_walk_ts_packets(file, pcr_count_handler, &count_ctx)) {
+                goto fail;
             }
             candidate_counts[i] = count_ctx.count;
         }
@@ -671,20 +665,18 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
                 if (candidate_counts[i] > candidate_counts[best_idx]) best_idx = i;
             }
             if (candidate_counts[best_idx] == 0) {
-                free(candidates);
-                free(candidate_counts);
-                free_psi_result(&out->psi);
-                return 1;
+                goto fail;
             }
             out->pcr_pid = candidates[best_idx];
         }
         free(candidates);
         free(candidate_counts);
+        candidates = NULL;
+        candidate_counts = NULL;
     }
 
     {
         jitter_stats_ctx_t stats_ctx;
-        rewind(file);
         stats_ctx.pcr_pid = out->pcr_pid;
         stats_ctx.first_pcr = 0;
         stats_ctx.last_pcr = 0;
@@ -692,9 +684,8 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         stats_ctx.last_byte_offset = 0;
         stats_ctx.pcr_sample_total = 0;
         stats_ctx.first_found = 0;
-        if (!walk_ts_packets(file, jitter_stats_handler, &stats_ctx)) {
-            free_psi_result(&out->psi);
-            return 1;
+        if (!rewind_and_walk_ts_packets(file, jitter_stats_handler, &stats_ctx)) {
+            goto fail;
         }
         out->pcr_sample_total = stats_ctx.pcr_sample_total;
         out->first_pcr = stats_ctx.first_pcr;
@@ -703,8 +694,7 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         out->last_byte_offset = stats_ctx.last_byte_offset;
         if (!stats_ctx.first_found || out->pcr_sample_total < 2 ||
             out->last_pcr <= out->first_pcr || out->last_byte_offset <= out->first_byte_offset) {
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
     }
 
@@ -716,11 +706,9 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         double reg_b = 0.0;
         int reg_ok = 0;
         pcr_collect_ctx_t collect_ctx = {.pcr_pid = out->pcr_pid, .samples = NULL, .count = 0, .capacity = 0};
-        rewind(file);
-        if (!walk_ts_packets(file, pcr_collect_handler, &collect_ctx)) {
+        if (!rewind_and_walk_ts_packets(file, pcr_collect_handler, &collect_ctx)) {
             free(collect_ctx.samples);
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
         if (collect_ctx.count >= 2u && pcr_fit_linear(collect_ctx.samples, collect_ctx.count, &reg_a, &reg_b)) {
             reg_ok = 1;
@@ -729,12 +717,10 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         free(collect_ctx.samples);
         collect_ctx.samples = NULL;
         if (!reg_ok) {
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
 
         jitter_preview_ctx_t preview_ctx;
-        rewind(file);
         preview_ctx.pcr_pid = out->pcr_pid;
         preview_ctx.prev_pcr = 0;
         preview_ctx.prev_byte_offset = 0;
@@ -745,16 +731,21 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
         preview_ctx.rows = NULL;
         preview_ctx.row_count = 0;
         preview_ctx.row_capacity = 0;
-        if (!walk_ts_packets(file, jitter_preview_handler, &preview_ctx)) {
+        if (!rewind_and_walk_ts_packets(file, jitter_preview_handler, &preview_ctx)) {
             free(preview_ctx.rows);
-            free_psi_result(&out->psi);
-            return 1;
+            goto fail;
         }
         out->preview_rows = preview_ctx.rows;
         out->preview_row_count = preview_ctx.row_count;
     }
 
     return 0;
+
+fail:
+    free(candidates);
+    free(candidate_counts);
+    free_psi_result(&out->psi);
+    return 1;
 }
 
 /* Release heap allocations inside ts_jitter_result_t. */

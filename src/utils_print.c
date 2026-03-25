@@ -15,12 +15,17 @@
 /* ============================================================================
  * Shared formatting helpers
  * ========================================================================== */
-static void pkt_line(const char* label, const char* value) {
-    printf(PKT_FMT, label, value);
-}
+typedef enum line_style_s {
+    LINE_STYLE_PACKET = 0,
+    LINE_STYLE_PES = 1
+} line_style_t;
 
-static void pes_line(const char* label, const char* value) {
-    printf(PES_LINE_FMT, label, value);
+static void print_labeled_line(line_style_t style, const char* label, const char* value) {
+    if (style == LINE_STYLE_PES) {
+        printf(PES_LINE_FMT, label, value);
+    } else {
+        printf(PKT_FMT, label, value);
+    }
 }
 
 static void format_pts_dts_string(uint64_t ts_90k, char* buf, size_t buf_size) {
@@ -108,27 +113,27 @@ void print_pes_header(const pes_packet_t* p) {
     printf("\n");
     printf("┌────────────────────────────────────────────────── PES header\n");
     snprintf(buf, sizeof buf, "0x%06X", p->packet_start_code_prefix);
-    pes_line("packet_start_code_prefix", buf);
+    print_labeled_line(LINE_STYLE_PES, "packet_start_code_prefix", buf);
     snprintf(buf, sizeof buf, "0x%02X", (unsigned)p->stream_id);
-    pes_line("stream_id", buf);
+    print_labeled_line(LINE_STYLE_PES, "stream_id", buf);
     snprintf(buf, sizeof buf, "%u", (unsigned)p->packet_length);
-    pes_line("packet_length", buf);
+    print_labeled_line(LINE_STYLE_PES, "packet_length", buf);
     snprintf(buf, sizeof buf, "%u%u", p->scrambling_control / 2, p->scrambling_control % 2);
-    pes_line("scrambling_control", buf);
-    pes_line("priority_indicator", BOOL_STRING(p->priority_indicator));
-    pes_line("data_alignment_indicator", BOOL_STRING(p->data_alignment_indicator));
-    pes_line("copyright_flag", BOOL_STRING(p->copyright_flag));
-    pes_line("original_or_copy", BOOL_STRING(p->original_or_copy));
+    print_labeled_line(LINE_STYLE_PES, "scrambling_control", buf);
+    print_labeled_line(LINE_STYLE_PES, "priority_indicator", BOOL_STRING(p->priority_indicator));
+    print_labeled_line(LINE_STYLE_PES, "data_alignment_indicator", BOOL_STRING(p->data_alignment_indicator));
+    print_labeled_line(LINE_STYLE_PES, "copyright_flag", BOOL_STRING(p->copyright_flag));
+    print_labeled_line(LINE_STYLE_PES, "original_or_copy", BOOL_STRING(p->original_or_copy));
     snprintf(buf, sizeof buf, "%u%u", p->PTS_DTS_flags / 2, p->PTS_DTS_flags % 2);
-    pes_line("PTS_DTS_flags", buf);
-    pes_line("escr_flag", BOOL_STRING(p->escr_flag));
-    pes_line("es_rate_flag", BOOL_STRING(p->es_rate_flag));
-    pes_line("dsm_trick_mode_flag", BOOL_STRING(p->dsm_trick_mode_flag));
-    pes_line("additional_copy_info_flag", BOOL_STRING(p->additional_copy_info_flag));
-    pes_line("crc_flag", BOOL_STRING(p->crc_flag));
-    pes_line("extension_flag", BOOL_STRING(p->extension_flag));
+    print_labeled_line(LINE_STYLE_PES, "PTS_DTS_flags", buf);
+    print_labeled_line(LINE_STYLE_PES, "escr_flag", BOOL_STRING(p->escr_flag));
+    print_labeled_line(LINE_STYLE_PES, "es_rate_flag", BOOL_STRING(p->es_rate_flag));
+    print_labeled_line(LINE_STYLE_PES, "dsm_trick_mode_flag", BOOL_STRING(p->dsm_trick_mode_flag));
+    print_labeled_line(LINE_STYLE_PES, "additional_copy_info_flag", BOOL_STRING(p->additional_copy_info_flag));
+    print_labeled_line(LINE_STYLE_PES, "crc_flag", BOOL_STRING(p->crc_flag));
+    print_labeled_line(LINE_STYLE_PES, "extension_flag", BOOL_STRING(p->extension_flag));
     snprintf(buf, sizeof buf, "%u", (unsigned)p->header_length);
-    pes_line("header_length", buf);
+    print_labeled_line(LINE_STYLE_PES, "header_length", buf);
     printf("└──────────────────────────────────────────────────\n");
 }
 
@@ -138,13 +143,13 @@ void print_pts_dts(const pes_packet_t* p) {
     printf("┌────────────────────────────────────────────────── PTS/DTS\n");
     if (p->PTS_DTS_flags >= 2u) {
         format_pts_dts_string(p->pts, buf, sizeof buf);
-        pes_line("PTS", buf);
+        print_labeled_line(LINE_STYLE_PES, "PTS", buf);
         if (p->PTS_DTS_flags == 3u) {
             format_pts_dts_string(p->dts, buf, sizeof buf);
-            pes_line("DTS", buf);
+            print_labeled_line(LINE_STYLE_PES, "DTS", buf);
         }
     } else {
-        pes_line("PTS", "(not present)");
+        print_labeled_line(LINE_STYLE_PES, "PTS", "(not present)");
     }
     printf("└──────────────────────────────────────────────────\n");
 }
@@ -214,24 +219,24 @@ void print_packet_header(ts_packet_t* packet, size_t packet_index) {
     printf("\n");
     printf("┌────────────────────────────────────────────────── TS packet\n");
     snprintf(buf, sizeof buf, "%zu", packet_index);
-    pkt_line("packet_index", buf);
+    print_labeled_line(LINE_STYLE_PACKET, "packet_index", buf);
     snprintf(buf, sizeof buf, "0x%02X", packet->sync_byte);
-    pkt_line("sync_byte", buf);
+    print_labeled_line(LINE_STYLE_PACKET, "sync_byte", buf);
     snprintf(buf, sizeof buf, "0x%04X", packet->pid);
-    pkt_line("PID", buf);
-    pkt_line("TEI", BOOL_STRING(packet->tei));
-    pkt_line("PUSI", BOOL_STRING(packet->pusi));
-    pkt_line("transport_priority", BOOL_STRING(packet->transport_priority));
+    print_labeled_line(LINE_STYLE_PACKET, "PID", buf);
+    print_labeled_line(LINE_STYLE_PACKET, "TEI", BOOL_STRING(packet->tei));
+    print_labeled_line(LINE_STYLE_PACKET, "PUSI", BOOL_STRING(packet->pusi));
+    print_labeled_line(LINE_STYLE_PACKET, "transport_priority", BOOL_STRING(packet->transport_priority));
     snprintf(buf, sizeof buf, "%u", (unsigned)packet->tsc);
-    pkt_line("TSC", buf);
+    print_labeled_line(LINE_STYLE_PACKET, "TSC", buf);
     {
         const char* afc_str = packet->adaptation_field_control == 1 ? "1 (payload only)" :
                               packet->adaptation_field_control == 2 ? "2 (adaptation only)" :
                               packet->adaptation_field_control == 3 ? "3 (adaptation+payload)" : "reserved";
-        pkt_line("adaptation_field_control", afc_str);
+        print_labeled_line(LINE_STYLE_PACKET, "adaptation_field_control", afc_str);
     }
     snprintf(buf, sizeof buf, "%u", (unsigned)packet->continuity_counter);
-    pkt_line("continuity_counter", buf);
+    print_labeled_line(LINE_STYLE_PACKET, "continuity_counter", buf);
     printf("├──────────────────────────────────────────────────\n");
 
     if (has_adaptation) {
@@ -276,9 +281,9 @@ void print_packet_header(ts_packet_t* packet, size_t packet_index) {
     if (has_payload) {
         snprintf(buf, sizeof buf, "offset=%u length=%u",
                  (unsigned)packet->payload_offset, (unsigned)packet->payload_length);
-        pkt_line("Payload", buf);
+        print_labeled_line(LINE_STYLE_PACKET, "Payload", buf);
     } else {
-        pkt_line("Payload", "(none)");
+        print_labeled_line(LINE_STYLE_PACKET, "Payload", "(none)");
     }
 
     printf("└──────────────────────────────────────────────────\n\n");
