@@ -47,6 +47,9 @@ typedef struct ts_jitter_preview_row_s {
     double actual_ms;
     double ideal_ms;
     double offset_ms;
+    int actual_valid;
+    int ideal_valid;
+    int offset_valid;
 } ts_jitter_preview_row_t;
 
 typedef struct ts_jitter_result_s {
@@ -60,7 +63,6 @@ typedef struct ts_jitter_result_s {
     size_t pcr_sample_total;
     ts_jitter_preview_row_t* preview_rows;
     size_t preview_row_count;
-    size_t preview_rows_omitted;
 } ts_jitter_result_t;
 
 /** @name Analysis-first API */
@@ -146,20 +148,20 @@ int analyze_validate(FILE* file, ts_validate_result_t* out);
 void free_validate_result(ts_validate_result_t* result);
 
 /**
- * @brief Analyze PCR jitter metrics and preview rows.
+ * @brief Analyze PCR jitter metrics and rows.
  *
- * Selects PCR PID candidates from PSI, computes bitrate, and produces preview
- * rows. If @p full_preview is non-zero, includes all PCR samples.
+ * Selects PCR PID candidates from PSI, computes bitrate, fits a linear reference
+ * PCR(byte_offset) over all PCR samples (least squares), then emits per-PCR rows:
+ * interval ActualΔ from measured PCR, IdealΔ from the reference slope, Jitter = ActualΔ − IdealΔ.
  *
- * @param[in]  file         Input file handle.
- * @param[out] out          Jitter result container.
- * @param[in]  full_preview Non-zero for full preview output.
+ * @param[in]  file Input file handle.
+ * @param[out] out  Jitter result container.
  * @retval 0 Success.
  * @retval 1 Failure.
  * @pre @p file != NULL and @p out != NULL.
  * @post Caller must free resources with free_jitter_result() on success.
  */
-int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview);
+int analyze_jitter(FILE* file, ts_jitter_result_t* out);
 /**
  * @brief Release heap-owned memory inside a jitter result.
  *
@@ -201,7 +203,7 @@ int run_mode_validate(FILE* file, const char* path);
  */
 int run_mode_hexdump(FILE* file, long packet_number);
 /**
- * @brief Print jitter metrics and compact preview visualization.
+ * @brief Print jitter metrics and full per-PCR row table (linear reference model).
  * @param[in] file Input file handle.
  * @retval 0 Success.
  * @retval 1 Failure.

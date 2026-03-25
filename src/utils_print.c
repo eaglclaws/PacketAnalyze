@@ -11,8 +11,6 @@
 
 #define PKT_FMT "│  %-24s %s\n"
 #define PES_LINE_FMT "│  %-26s %s\n"
-#define PES_PREVIEW_FIRST 10u
-#define PES_PREVIEW_LAST  10u
 
 /* ============================================================================
  * Shared formatting helpers
@@ -196,20 +194,10 @@ void print_pes_packet_list_report(const pes_packet_list_table_t* table) {
             printf("└──────────────────────────────────────────────────\n");
             continue;
         }
-        {
-            const size_t show_first = (n <= PES_PREVIEW_FIRST + PES_PREVIEW_LAST) ? n : PES_PREVIEW_FIRST;
-            const size_t show_last = (n <= PES_PREVIEW_FIRST + PES_PREVIEW_LAST) ? 0u : PES_PREVIEW_LAST;
-            for (size_t j = 0; j < show_first; j++) {
-                printf("├── PES #%zu of %zu ───────────────────────────────┤\n", j, n);
-                print_pes_header(&plist->packets[j]);
-                print_pts_dts(&plist->packets[j]);
-            }
-            if (show_last > 0u) {
-                printf("│  ... %zu more ...\n", n - show_first - show_last);
-                for (size_t j = n - show_last; j < n; j++) {
-                    print_pes_one_line(&plist->packets[j], j);
-                }
-            }
+        for (size_t j = 0; j < n; j++) {
+            printf("├── PES #%zu of %zu ───────────────────────────────┤\n", j, n);
+            print_pes_header(&plist->packets[j]);
+            print_pts_dts(&plist->packets[j]);
         }
         printf("└──────────────────────────────────────────────────\n");
     }

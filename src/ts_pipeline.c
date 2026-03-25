@@ -17,8 +17,6 @@
  */
 
 #define PACKET_SIZE 188
-#define JITTER_PREVIEW_HEAD 20u
-#define JITTER_PREVIEW_TAIL 20u
 
 /* ============================================================================
  * Jitter preview rendering
@@ -26,32 +24,59 @@
 static void print_jitter_header(void) {
     printf("\n");
     printf("┌───────────────────────────────────────────────────────────────────────────────────────\n");
-    printf("│  %-10s %-12s %-12s %-12s %s\n", "Packet", "Actual(ms)", "Ideal(ms)", "Offset(ms)", "Visual");
+    printf("│  %-10s %-12s %-12s %-12s %s\n", "Packet", "ActualΔ(ms)", "IdealΔ(ms)", "Jitter(ms)", "Visual");
     printf("├───────────────────────────────────────────────────────────────────────────────────────\n");
 }
 
-static void print_jitter_row(size_t packet_idx, double actual_ms, double ideal_ms, double offset_ms) {
+static void print_jitter_row(size_t packet_idx, double actual_ms, int actual_valid,
+                             double ideal_ms, int ideal_valid,
+                             double offset_ms, int offset_valid) {
     const double scale_ms = 25.0;
     const int half_width = 22;
-    int steps = (int)llround(offset_ms / scale_ms);
-    if (steps > half_width) steps = half_width;
-    if (steps < -half_width) steps = -half_width;
+    int steps = 0;
+    if (offset_valid) {
+        steps = (int)llround(offset_ms / scale_ms);
+        if (steps > half_width) steps = half_width;
+        if (steps < -half_width) steps = -half_width;
+    }
 
     char visual[64];
+    char actual_text[16];
+    char ideal_text[16];
+    char offset_text[16];
     int pos = 0;
-    for (int i = -half_width; i <= half_width; i++) {
-        if (i == 0) {
-            visual[pos++] = '|';
-        } else if (i == steps) {
-            visual[pos++] = '*';
-        } else {
-            visual[pos++] = '.';
+    if (offset_valid) {
+        for (int i = -half_width; i <= half_width; i++) {
+            if (i == 0) {
+                visual[pos++] = '|';
+            } else if (i == steps) {
+                visual[pos++] = '*';
+            } else {
+                visual[pos++] = '.';
+            }
         }
+        visual[pos] = '\0';
+    } else {
+        snprintf(visual, sizeof(visual), "N/A");
     }
-    visual[pos] = '\0';
+    if (actual_valid) {
+        snprintf(actual_text, sizeof(actual_text), "%.3f", actual_ms);
+    } else {
+        snprintf(actual_text, sizeof(actual_text), "N/A");
+    }
+    if (ideal_valid) {
+        snprintf(ideal_text, sizeof(ideal_text), "%.3f", ideal_ms);
+    } else {
+        snprintf(ideal_text, sizeof(ideal_text), "N/A");
+    }
+    if (offset_valid) {
+        snprintf(offset_text, sizeof(offset_text), "%+.3f", offset_ms);
+    } else {
+        snprintf(offset_text, sizeof(offset_text), "N/A");
+    }
 
-    printf("│  %-10zu %-12.3f %-12.3f %-+12.3f %s\n",
-           packet_idx, actual_ms, ideal_ms, offset_ms, visual);
+    printf("│  %-10zu %-12s %-12s %-12s %s\n",
+           packet_idx, actual_text, ideal_text, offset_text, visual);
 }
 
 typedef int (*ts_packet_handler_fn)(const uint8_t* raw, const ts_packet_t* packet, size_t packet_index, void* ctx);
@@ -89,18 +114,27 @@ typedef struct jitter_stats_ctx_s {
 
 typedef struct jitter_preview_ctx_s {
     uint16_t pcr_pid;
-    uint64_t first_pcr;
-    size_t first_byte_offset;
-    double bitrate;
-    size_t pcr_sample_total;
-    size_t pcr_sample_index;
+    uint64_t prev_pcr;
+    size_t prev_byte_offset;
+    double reg_b; /* ticks per byte: PCR ≈ a + reg_b * byte_offset (a from fit, not needed per interval) */
+    int reg_valid;
     int first_found;
-    int full_preview;
     ts_jitter_preview_row_t* rows;
     size_t row_count;
     size_t row_capacity;
-    size_t omitted_rows;
 } jitter_preview_ctx_t;
+
+typedef struct pcr_sample_s {
+    size_t byte_offset;
+    uint64_t pcr;
+} pcr_sample_t;
+
+typedef struct pcr_collect_ctx_s {
+    uint16_t pcr_pid;
+    pcr_sample_t* samples;
+    size_t count;
+    size_t capacity;
+} pcr_collect_ctx_t;
 
 typedef struct pes_walk_ctx_s {
     pat_table_t* pat;
@@ -206,8 +240,67 @@ static int jitter_stats_handler(const uint8_t* raw, const ts_packet_t* packet, s
     return 1;
 }
 
+static int pcr_collect_append(pcr_collect_ctx_t* c, size_t byte_offset, uint64_t pcr) {
+    if (c->count == c->capacity) {
+        size_t new_cap = c->capacity == 0u ? 128u : c->capacity * 2u;
+        pcr_sample_t* p = (pcr_sample_t*)realloc(c->samples, sizeof(pcr_sample_t) * new_cap);
+        if (p == NULL) {
+            return 0;
+        }
+        c->samples = p;
+        c->capacity = new_cap;
+    }
+    c->samples[c->count].byte_offset = byte_offset;
+    c->samples[c->count].pcr = pcr;
+    c->count++;
+    return 1;
+}
+
+static int pcr_collect_handler(const uint8_t* raw, const ts_packet_t* packet, size_t packet_index, void* ctx) {
+    pcr_collect_ctx_t* state = (pcr_collect_ctx_t*)ctx;
+    (void)raw;
+    if (packet->pcr_valid && packet->pid == state->pcr_pid) {
+        uint64_t pcr = pcr_to_time(packet->pcr_base, packet->pcr_ext);
+        if (!pcr_collect_append(state, packet_index * PACKET_SIZE, pcr)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Least squares: pcr_ticks ≈ a + b * byte_offset. Returns 0 if singular or n < 2. */
+static int pcr_fit_linear(const pcr_sample_t* samples, size_t n, double* out_a, double* out_b) {
+    if (samples == NULL || n < 2u || out_a == NULL || out_b == NULL) {
+        return 0;
+    }
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_xx = 0.0;
+    double sum_xy = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        double x = (double)samples[i].byte_offset;
+        double y = (double)samples[i].pcr;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    double nn = (double)n;
+    double denom = nn * sum_xx - sum_x * sum_x;
+    if (fabs(denom) < 1e-3) {
+        return 0;
+    }
+    double b = (nn * sum_xy - sum_x * sum_y) / denom;
+    double a = (sum_y - b * sum_x) / nn;
+    *out_a = a;
+    *out_b = b;
+    return 1;
+}
+
 static int jitter_preview_push_row(jitter_preview_ctx_t* state, size_t packet_index,
-                                   double actual_ms, double ideal_ms, double offset_ms) {
+                                   double actual_ms, int actual_valid,
+                                   double ideal_ms, int ideal_valid,
+                                   double offset_ms, int offset_valid) {
     if (state->row_count == state->row_capacity) {
         size_t new_cap = state->row_capacity == 0u ? 128u : state->row_capacity * 2u;
         ts_jitter_preview_row_t* new_rows =
@@ -222,6 +315,9 @@ static int jitter_preview_push_row(jitter_preview_ctx_t* state, size_t packet_in
     state->rows[state->row_count].actual_ms = actual_ms;
     state->rows[state->row_count].ideal_ms = ideal_ms;
     state->rows[state->row_count].offset_ms = offset_ms;
+    state->rows[state->row_count].actual_valid = actual_valid;
+    state->rows[state->row_count].ideal_valid = ideal_valid;
+    state->rows[state->row_count].offset_valid = offset_valid;
     state->row_count++;
     return 1;
 }
@@ -231,34 +327,44 @@ static int jitter_preview_handler(const uint8_t* raw, const ts_packet_t* packet,
     (void)raw;
     if (packet->pcr_valid && packet->pid == state->pcr_pid) {
         uint64_t pcr = pcr_to_time(packet->pcr_base, packet->pcr_ext);
+        size_t actual_byte_offset = packet_index * PACKET_SIZE;
+        double actual_time_ms = 0.0;
+        double ideal_time_ms = 0.0;
+        double offset_ms = 0.0;
+        int actual_valid = 0;
+        int ideal_valid = 0;
+        int offset_valid = 0;
         if (!state->first_found) {
-            state->first_pcr = pcr;
-            state->first_byte_offset = packet_index * PACKET_SIZE;
+            state->prev_pcr = pcr;
+            state->prev_byte_offset = actual_byte_offset;
             state->first_found = 1;
+        } else {
+            uint64_t delta_pcr = pcr - state->prev_pcr;
+            size_t delta_bytes = actual_byte_offset - state->prev_byte_offset;
+            if (delta_pcr > 0u && delta_bytes > 0u) {
+                double actual_time_seconds = (double)delta_pcr / 27000000.0;
+                actual_time_ms = actual_time_seconds * 1000.0;
+                actual_valid = 1;
+                if (state->reg_valid) {
+                    double ideal_delta_ticks = state->reg_b * (double)delta_bytes;
+                    double ideal_time_seconds = ideal_delta_ticks / 27000000.0;
+                    ideal_time_ms = ideal_time_seconds * 1000.0;
+                    ideal_valid = 1;
+                    offset_ms = actual_time_ms - ideal_time_ms;
+                    offset_valid = 1;
+                }
+            }
+            state->prev_pcr = pcr;
+            state->prev_byte_offset = actual_byte_offset;
         }
         {
-            double actual_time_seconds = (double)(pcr - state->first_pcr) / 27000000.0;
-            size_t actual_byte_offset = packet_index * PACKET_SIZE;
-            double ideal_time_seconds = (double)(actual_byte_offset - state->first_byte_offset) * 8.0 / state->bitrate;
-            double offset_ms = (actual_time_seconds - ideal_time_seconds) * 1000.0;
-            const int in_head = (state->pcr_sample_index < JITTER_PREVIEW_HEAD);
-            const size_t tail_start = (state->pcr_sample_total > JITTER_PREVIEW_TAIL)
-                ? (state->pcr_sample_total - JITTER_PREVIEW_TAIL) : 0u;
-            const int in_tail = (state->pcr_sample_index >= tail_start);
-            if (state->full_preview || in_head || in_tail) {
-                if (!jitter_preview_push_row(state, packet_index,
-                                             actual_time_seconds * 1000.0,
-                                             ideal_time_seconds * 1000.0,
-                                             offset_ms)) {
-                    return 0;
-                }
-            } else if (state->omitted_rows == 0u) {
-                state->omitted_rows = (state->pcr_sample_total > (JITTER_PREVIEW_HEAD + JITTER_PREVIEW_TAIL))
-                    ? (state->pcr_sample_total - JITTER_PREVIEW_HEAD - JITTER_PREVIEW_TAIL)
-                    : 0u;
+            if (!jitter_preview_push_row(state, packet_index,
+                                         actual_time_ms, actual_valid,
+                                         ideal_time_ms, ideal_valid,
+                                         offset_ms, offset_valid)) {
+                return 0;
             }
         }
-        state->pcr_sample_index++;
     }
     return 1;
 }
@@ -509,9 +615,8 @@ void free_validate_result(ts_validate_result_t* result) {
     result->undefined_pid_count = 0;
 }
 
-/* Analyze jitter metrics and preview rows without rendering.
- * If full_preview != 0, all PCR samples are included; otherwise only head+tail. */
-int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview) {
+/* Analyze jitter metrics and rows without rendering. */
+int analyze_jitter(FILE* file, ts_jitter_result_t* out) {
     if (file == NULL || out == NULL) {
         return 1;
     }
@@ -607,20 +712,39 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview) {
                    ((double)(out->last_pcr - out->first_pcr) / 27000000.0);
 
     {
+        double reg_a = 0.0;
+        double reg_b = 0.0;
+        int reg_ok = 0;
+        pcr_collect_ctx_t collect_ctx = {.pcr_pid = out->pcr_pid, .samples = NULL, .count = 0, .capacity = 0};
+        rewind(file);
+        if (!walk_ts_packets(file, pcr_collect_handler, &collect_ctx)) {
+            free(collect_ctx.samples);
+            free_psi_result(&out->psi);
+            return 1;
+        }
+        if (collect_ctx.count >= 2u && pcr_fit_linear(collect_ctx.samples, collect_ctx.count, &reg_a, &reg_b)) {
+            reg_ok = 1;
+        }
+        (void)reg_a; /* intercept only needed for fit; intervals use slope reg_b */
+        free(collect_ctx.samples);
+        collect_ctx.samples = NULL;
+        if (!reg_ok) {
+            free_psi_result(&out->psi);
+            return 1;
+        }
+
         jitter_preview_ctx_t preview_ctx;
         rewind(file);
         preview_ctx.pcr_pid = out->pcr_pid;
-        preview_ctx.first_pcr = 0;
-        preview_ctx.first_byte_offset = 0;
-        preview_ctx.bitrate = out->bitrate;
-        preview_ctx.pcr_sample_total = out->pcr_sample_total;
-        preview_ctx.pcr_sample_index = 0;
+        preview_ctx.prev_pcr = 0;
+        preview_ctx.prev_byte_offset = 0;
+        (void)reg_a;
+        preview_ctx.reg_b = reg_b;
+        preview_ctx.reg_valid = 1;
         preview_ctx.first_found = 0;
-        preview_ctx.full_preview = (full_preview != 0);
         preview_ctx.rows = NULL;
         preview_ctx.row_count = 0;
         preview_ctx.row_capacity = 0;
-        preview_ctx.omitted_rows = 0;
         if (!walk_ts_packets(file, jitter_preview_handler, &preview_ctx)) {
             free(preview_ctx.rows);
             free_psi_result(&out->psi);
@@ -628,7 +752,6 @@ int analyze_jitter(FILE* file, ts_jitter_result_t* out, int full_preview) {
         }
         out->preview_rows = preview_ctx.rows;
         out->preview_row_count = preview_ctx.row_count;
-        out->preview_rows_omitted = preview_ctx.omitted_rows;
     }
 
     return 0;
@@ -642,7 +765,6 @@ void free_jitter_result(ts_jitter_result_t* result) {
     free(result->preview_rows);
     result->preview_rows = NULL;
     result->preview_row_count = 0;
-    result->preview_rows_omitted = 0;
     free_psi_result(&result->psi);
 }
 
@@ -725,7 +847,7 @@ int run_mode_hexdump(FILE* file, long packet_number) {
 
 int run_mode_jitter_test(FILE* file) {
     ts_jitter_result_t result;
-    if (analyze_jitter(file, &result, 0) != 0) {
+    if (analyze_jitter(file, &result) != 0) {
         printf("Unable to determine PMT/PCR PID.\n");
         return 1;
     }
@@ -734,29 +856,18 @@ int run_mode_jitter_test(FILE* file) {
            (unsigned long long)result.first_pcr, (unsigned long long)result.last_pcr);
     printf("First byte offset: %zu, Last byte offset: %zu\n", result.first_byte_offset, result.last_byte_offset);
     printf("Bitrate: %f bps\n", result.bitrate);
-    printf("Preview rows: first %u + last %u (total PCR samples: %zu)\n",
-           (unsigned)JITTER_PREVIEW_HEAD, (unsigned)JITTER_PREVIEW_TAIL, result.pcr_sample_total);
+    printf("Jitter model: per-interval Δ vs linear PCR×byte fit (least squares on all PCR samples)\n");
+    printf("%zu rows\n", result.preview_row_count);
     print_jitter_header();
     {
-        size_t head = result.preview_row_count < JITTER_PREVIEW_HEAD ? result.preview_row_count : JITTER_PREVIEW_HEAD;
-        size_t tail_start = head;
-        if (result.preview_row_count > head && result.pcr_sample_total > (JITTER_PREVIEW_HEAD + JITTER_PREVIEW_TAIL)) {
-            tail_start = result.preview_row_count - JITTER_PREVIEW_TAIL;
-        }
-        for (size_t i = 0; i < head; i++) {
+        for (size_t i = 0; i < result.preview_row_count; i++) {
             print_jitter_row(result.preview_rows[i].packet_index,
                              result.preview_rows[i].actual_ms,
+                             result.preview_rows[i].actual_valid,
                              result.preview_rows[i].ideal_ms,
-                             result.preview_rows[i].offset_ms);
-        }
-        if (result.preview_rows_omitted > 0u) {
-            printf("│  ... %zu rows omitted ...\n", result.preview_rows_omitted);
-        }
-        for (size_t i = tail_start; i < result.preview_row_count; i++) {
-            print_jitter_row(result.preview_rows[i].packet_index,
-                             result.preview_rows[i].actual_ms,
-                             result.preview_rows[i].ideal_ms,
-                             result.preview_rows[i].offset_ms);
+                             result.preview_rows[i].ideal_valid,
+                             result.preview_rows[i].offset_ms,
+                             result.preview_rows[i].offset_valid);
         }
     }
     printf("└───────────────────────────────────────────────────────────────────────────────────────\n");

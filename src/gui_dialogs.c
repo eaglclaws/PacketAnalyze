@@ -473,8 +473,23 @@ static void jitter_draw_func(GtkDrawingArea* area, cairo_t* cr, int width, int h
     const ts_jitter_result_t* j = (const ts_jitter_result_t*)data;
     if (!j || j->preview_row_count == 0) return;
 
-    double min_off = j->preview_rows[0].offset_ms, max_off = min_off;
-    for (size_t i = 1; i < j->preview_row_count; i++) {
+    size_t first_valid = j->preview_row_count;
+    for (size_t i = 0; i < j->preview_row_count; i++) {
+        if (j->preview_rows[i].offset_valid) {
+            first_valid = i;
+            break;
+        }
+    }
+    if (first_valid == j->preview_row_count) return;
+
+    size_t min_packet_idx = j->preview_rows[first_valid].packet_index;
+    size_t max_packet_idx = min_packet_idx;
+    double min_off = j->preview_rows[first_valid].offset_ms;
+    double max_off = min_off;
+    for (size_t i = first_valid + 1; i < j->preview_row_count; i++) {
+        if (!j->preview_rows[i].offset_valid) continue;
+        if (j->preview_rows[i].packet_index < min_packet_idx) min_packet_idx = j->preview_rows[i].packet_index;
+        if (j->preview_rows[i].packet_index > max_packet_idx) max_packet_idx = j->preview_rows[i].packet_index;
         double o = j->preview_rows[i].offset_ms;
         if (o < min_off) min_off = o;
         if (o > max_off) max_off = o;
@@ -510,13 +525,27 @@ static void jitter_draw_func(GtkDrawingArea* area, cairo_t* cr, int width, int h
 
     cairo_set_source_rgb(cr, 0.2, 0.6, 0.95);
     cairo_set_line_width(cr, 1.5);
+    int started_line = 0;
+    double packet_span = (double)(unsigned long)(max_packet_idx - min_packet_idx);
+    if (packet_span < 1.0) packet_span = 1.0;
     for (size_t i = 0; i < j->preview_row_count; i++) {
-        double x = margin_l + (double)(unsigned long)i / (double)(unsigned long)(j->preview_row_count > 1u ? j->preview_row_count - 1u : 1u) * (double)plot_w;
+        if (!j->preview_rows[i].offset_valid) {
+            if (started_line) {
+                cairo_stroke(cr);
+                started_line = 0;
+            }
+            continue;
+        }
+        double x = margin_l + ((double)(unsigned long)(j->preview_rows[i].packet_index - min_packet_idx) / packet_span) * (double)plot_w;
         double y = margin_t + plot_h * (1.0 - (j->preview_rows[i].offset_ms - y_min) / y_range);
-        if (i == 0) cairo_move_to(cr, x, y);
-        else cairo_line_to(cr, x, y);
+        if (!started_line) {
+            cairo_move_to(cr, x, y);
+            started_line = 1;
+        } else {
+            cairo_line_to(cr, x, y);
+        }
     }
-    cairo_stroke(cr);
+    if (started_line) cairo_stroke(cr);
 
     cairo_set_source_rgb(cr, 0.7, 0.7, 0.75);
     cairo_set_font_size(cr, 10);
@@ -528,7 +557,7 @@ static void jitter_draw_func(GtkDrawingArea* area, cairo_t* cr, int width, int h
     cairo_move_to(cr, 4, height - margin_b);
     cairo_show_text(cr, buf);
     cairo_move_to(cr, margin_l, height - 8);
-    cairo_show_text(cr, "sample index");
+    cairo_show_text(cr, "packet index");
 }
 
 void gui_show_jitter_popup(GtkWindow* parent, const char* path) {
@@ -537,7 +566,7 @@ void gui_show_jitter_popup(GtkWindow* parent, const char* path) {
     if (!f) return;
     ts_jitter_result_t* result = (ts_jitter_result_t*)calloc(1, sizeof(ts_jitter_result_t));
     if (!result) { fclose(f); return; }
-    if (analyze_jitter(f, result, 1) != 0) {
+    if (analyze_jitter(f, result) != 0) {
         free(result);
         fclose(f);
         return;
