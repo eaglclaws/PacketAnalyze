@@ -200,7 +200,7 @@ void print_pes_packet_list_report(const pes_packet_list_table_t* table) {
             continue;
         }
         for (size_t j = 0; j < n; j++) {
-            printf("├── PES #%zu of %zu ───────────────────────────────┤\n", j, n);
+            printf("├── PES #%zu of %zu ───────────────────────────────┤\n", j + 1, n);
             print_pes_header(&plist->packets[j]);
             print_pts_dts(&plist->packets[j]);
         }
